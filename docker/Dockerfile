@@ -1,5 +1,5 @@
 FROM ubuntu:latest
-MAINTAINER Harshit Prasad
+MAINTAINER publicplan GmbH
 
 # Update
 RUN apt-get update
@@ -33,10 +33,10 @@ RUN tar xf rabbitmq-server-generic-unix-3.6.6.tar.xz
 RUN apt-get install -y erlang
 
 RUN wget https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-5.5.0.tar.gz
-RUN sha1sum elasticsearch-5.5.0.tar.gz 
+RUN sha1sum elasticsearch-5.5.0.tar.gz
 RUN tar -xzf elasticsearch-5.5.0.tar.gz
 
-RUN git clone https://github.com/nikhilrayaprolu/yacy_grid_mcp.git
+RUN git clone https://github.com/publicplan/yacy_grid_mcp.git
 WORKDIR /yacy_grid_mcp
 
 RUN cat docker/config-ftp.properties > ../apache-ftpserver-1.1.0/res/conf/users.properties
