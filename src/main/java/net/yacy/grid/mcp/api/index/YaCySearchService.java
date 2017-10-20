@@ -19,13 +19,20 @@
 
 package net.yacy.grid.mcp.api.index;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
 import javax.servlet.http.HttpServletResponse;
 
+import org.elasticsearch.common.lucene.search.function.FiltersFunctionScoreQuery.ScoreMode;
 import org.elasticsearch.index.query.Operator;
+import org.elasticsearch.index.query.QueryBuilder;
+import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.index.query.functionscore.FunctionScoreQueryBuilder;
+import org.elasticsearch.index.query.functionscore.ScoreFunctionBuilder;
+import org.elasticsearch.index.search.MatchQuery.ZeroTermsQuery;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -51,27 +58,48 @@ public class YaCySearchService extends ObjectAPIHandler implements APIHandler {
     @Override
     public String getAPIPath() {
         return "/yacy/grid/mcp/index/" + NAME + ".json";
-    }
+    }    
     
     @Override
     public ServiceResponse serviceImpl(Query call, HttpServletResponse response) {
+        String callback = call.get("callback", "");
+        boolean jsonp = callback != null && callback.length() > 0;
+        boolean minified = call.get("minified", false);
         String query = call.get("query", "");
-        String contentdom = call.get("contentdom", "text");
+        //String contentdom = call.get("contentdom", "text");
         int maximumRecords = call.get("maximumRecords", 10);
         int startRecord = call.get("startRecord", 0);
-        int meanCount = call.get("meanCount", 5);
+        //int meanCount = call.get("meanCount", 5);
         int timezoneOffset = call.get("timezoneOffset", 0);
-        String nav = call.get("nav", "");
-        String prefermaskfilter = call.get("prefermaskfilter", "");
-        String constraint = call.get("constraint", "");
-        long timeout = call.get("timeout", -1);
+        //String nav = call.get("nav", "");
+        //String prefermaskfilter = call.get("prefermaskfilter", "");
+        //String constraint = call.get("constraint", "");
+        int facetLimit = call.get("facetLimit", 10);
+        String facetFields = call.get("facetFields", "host_s,url_file_ext_s,author_sxt,dates_in_content_dts,language_s,url_protocol_s,collection_sxt");
+        List<WebMapping> facetFieldMapping = new ArrayList<>();
+        for (String s: facetFields.split(",")) facetFieldMapping.add(WebMapping.valueOf(s));
+        
         JSONObject json = new JSONObject(true);
         
-        List<Map<String, Object>> result = Data.index.query("web", query, Operator.AND, 0, 10, "text_t");
-
+        QueryBuilder qb = QueryBuilders
+                .multiMatchQuery(query)
+                .operator(Operator.AND)
+                .zeroTermsQuery(ZeroTermsQuery.ALL)
+                .field(WebMapping.host_organization_s.getSolrFieldName(), 1000.0f)
+                .field(WebMapping.url_paths_sxt.getSolrFieldName(), 500.0f)
+                .field(WebMapping.url_file_name_s.getSolrFieldName(), 200.0f)
+                .field(WebMapping.title.getSolrFieldName(), 100.0f)
+                .field(WebMapping.h1_txt.getSolrFieldName(), 50.0f)
+                .field(WebMapping.h2_txt.getSolrFieldName(), 10.0f)
+                .field(WebMapping.h3_txt.getSolrFieldName(), 6.0f)
+                .field(WebMapping.h4_txt.getSolrFieldName(), 3.0f)
+                .field(WebMapping.text_t.getSolrFieldName(), 1.0f);
+        
+        net.yacy.grid.io.index.ElasticsearchClient.Query eq = Data.index.query("web", qb, timezoneOffset, startRecord, maximumRecords, facetLimit, facetFieldMapping.toArray(new WebMapping[facetFieldMapping.size()]));
+        
         JSONArray channels = new JSONArray();
         json.put("channels", channels);
-        JSONObject channel = new JSONObject();
+        JSONObject channel = new JSONObject(true);
         channels.put(channel);
         JSONArray items = new JSONArray();
         channel.put("title", "Search for " + query);
@@ -79,8 +107,9 @@ public class YaCySearchService extends ObjectAPIHandler implements APIHandler {
         channel.put("startIndex", "" + startRecord);
         channel.put("itemsPerPage", "" + items.length());
         channel.put("searchTerms", query);
+        channel.put("totalResults", Integer.toString(eq.hitCount));
         channel.put("items", items);
-        result.forEach(map -> {
+        eq.result.forEach(map -> {
             JSONObject hit = new JSONObject(true);
             List<?> title = (List<?>) map.get(WebMapping.title.getSolrFieldName());
             String titleString = title == null || title.isEmpty() ? "" : title.iterator().next().toString();
@@ -103,9 +132,69 @@ public class YaCySearchService extends ObjectAPIHandler implements APIHandler {
             hit.put("host", host);
             items.put(hit);
         });
-        return new ServiceResponse(json);
+        JSONArray navigation = new JSONArray();
+        channel.put("navigation", navigation);
+        
+        Map<String, List<Map.Entry<String, Long>>> aggregations = eq.aggregations;
+        for (Map.Entry<String, List<Map.Entry<String, Long>>> fe: aggregations.entrySet()) {
+            String facetname = fe.getKey();
+            WebMapping mapping = WebMapping.valueOf(facetname);
+            JSONObject facetobject = new JSONObject(true);
+            facetobject.put("facetname", mapping.getFacetname());
+            facetobject.put("displayname", mapping.getDisplayname());
+            facetobject.put("type", mapping.getFacettype());
+            facetobject.put("min", "0");
+            facetobject.put("max", "0");
+            facetobject.put("mean", "0");
+            JSONArray elements = new JSONArray();
+            facetobject.put("elements", elements);
+            for (Map.Entry<String, Long> element: fe.getValue()) {
+                JSONObject elementEntry = new JSONObject(true);
+                elementEntry.put("name", element.getKey());
+                elementEntry.put("count", element.getValue().toString());
+                elementEntry.put("modifier", mapping.getFacetmodifier() + ":" + element.getKey());
+                elements.put(elementEntry);
+            }
+            navigation.put(facetobject);
+        }
+        
+        if (jsonp) {
+            StringBuilder sb = new StringBuilder(1024);
+            sb.append(callback).append("([").append(json.toString(minified ? 0 : 2)).append("]);");
+            return new ServiceResponse(sb.toString());
+        } else {
+            return new ServiceResponse(json);
+        }
     }
     
+    /*
+     * 
+     * {collection_sxt=[], url_file_ext_s=[html=58, php=4, 591571=1, htm=1, muenchen=1], dates_in_content_dts=[2017-09-21T02:00:00.000Z=29, 2017-09-20T02:00:00.000Z=22, 2017-09-18T02:00:00.000Z=19, 2017-09-04T02:00:00.000Z=17, 2017-09-15T02:00:00.000Z=17, 2017-09-12T02:00:00.000Z=16, 2017-09-14T02:00:00.000Z=16, 2017-09-19T02:00:00.000Z=16, 2017-08-04T02:00:00.000Z=14, 2017-08-09T02:00:00.000Z=13], author_sxt=[], host_s=[www.welt.de=75, www.facebook.com=9, en.wikipedia.org=8, flug.idealo.de=7, www.idealo.de=5, www.ladenzeile.de=5, l.facebook.com=3, nl.wikipedia.org=3, plus.google.com=3, www.youtube.com=3], language_s=[], url_protocol_s=[http=83, https=69]}
+     * 
+     * 
+],
+"navigation":[
+
+{"facetname":"filetypes","displayname":"Filetypes","type":"String","min":"0","max":"0","mean":"0","elements":[
+{"name":"html","count":"92035","modifier":"filetype%3Ahtml"},
+{"name":"jpg","count":"28620","modifier":"filetype%3Ajpg"},
+{"name":"php","count":"18716","modifier":"filetype%3Aphp"},
+{"name":"png","count":"14835","modifier":"filetype%3Apng"},
+{"name":"htm","count":"8239","modifier":"filetype%3Ahtm"},
+{"name":"g","count":"4951","modifier":"filetype%3Ag"},
+{"name":"aspx","count":"4054","modifier":"filetype%3Aaspx"},
+{"name":"cgi","count":"3917","modifier":"filetype%3Acgi"},
+{"name":"pdf","count":"3917","modifier":"filetype%3Apdf"},
+{"name":"gif","count":"3226","modifier":"filetype%3Agif"},
+{"name":"jsp","count":"2620","modifier":"filetype%3Ajsp"},
+{"name":"asp","count":"2202","modifier":"filetype%3Aasp"},
+{"name":"shtml","count":"1718","modifier":"filetype%3Ashtml"},
+{"name":"cfm","count":"1392","modifier":"filetype%3Acfm"},
+{"name":"svg","count":"825","modifier":"filetype%3Asvg"},
+{"name":"com","count":"628","modifier":"filetype%3Acom"}
+]}
+]}]}
+     */
     /*
 http://192.168.1.60:8000/yacysearch.json?query=casey+neistat&Enter=&contentdom=text&former=casey+neistad&maximumRecords=10
 &startRecord=0&verify=ifexist&resource=global&nav=location%2Chosts%2Cauthors%2Cnamespace%2Ctopics%2Cfiletype%2Cprotocol%2Clanguage&

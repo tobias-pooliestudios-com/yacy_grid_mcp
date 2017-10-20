@@ -44,3 +44,9 @@ target/
 /class/
 .DS_Store
 .settings
+yacy_grid_mcp.eml
+yacy_grid_mcp.iml
+bin/ai/
+bin/log4j.properties
+bin/net/
+bin/org/

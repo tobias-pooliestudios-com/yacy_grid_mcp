@@ -29,8 +29,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javax.servlet.http.HttpServletResponse;
 
 import org.elasticsearch.index.query.Operator;
-import org.json.JSONArray;
-import org.json.JSONObject;
 import org.json.XML;
 
 import net.yacy.grid.http.APIHandler;
@@ -66,15 +64,14 @@ public class GSASearchService extends ObjectAPIHandler implements APIHandler {
     public ServiceResponse serviceImpl(Query call, HttpServletResponse response) {
         String query = call.get("q", "");
         String queryXML = XML.escape(query);
-        String contentdom = call.get("contentdom", "text");
+        //String contentdom = call.get("contentdom", "text");
         int maximumRecords = call.get("num", 10);
         int startRecord = call.get("startRecord", 0);
-        int meanCount = call.get("meanCount", 5);
-        int timezoneOffset = call.get("timezoneOffset", 0);
-        String nav = call.get("nav", "");
-        String prefermaskfilter = call.get("prefermaskfilter", "");
-        String constraint = call.get("constraint", "");
-        long timeout = call.get("timeout", -1);
+        //int meanCount = call.get("meanCount", 5);
+        //int timezoneOffset = call.get("timezoneOffset", 0);
+        //String nav = call.get("nav", "");
+        //String prefermaskfilter = call.get("prefermaskfilter", "");
+        //String constraint = call.get("constraint", "");
         
         // no xml encoder here on purpose, we will try to not have such things into our software in the future!
         StringBuffer sb = new StringBuffer(2048);

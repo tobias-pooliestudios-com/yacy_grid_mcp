@@ -37,8 +37,9 @@ import org.eclipse.jetty.server.handler.DefaultHandler;
 import org.eclipse.jetty.server.handler.ErrorHandler;
 import org.eclipse.jetty.server.handler.HandlerList;
 import org.eclipse.jetty.servlet.ServletContextHandler;
-import org.eclipse.jetty.util.log.Log;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
+
+import net.yacy.grid.mcp.Data;
 
 /**
  * main server class as static class: we made this static on purpose because then it is always
@@ -70,11 +71,11 @@ public class APIServer {
         return serviceMap.get(name);
     }
 
-    public static int open(int port, int expiresSeconds, String htmlPath, boolean force) throws IOException {
+    public static int open(int port, String htmlPath, boolean force) throws IOException {
         int ap = 0;
         while (true) {
             try {
-                open(port + ap, expiresSeconds, htmlPath);
+                open(port + ap, htmlPath);
                 return port + ap;
             } catch (IOException e) {
                 if (force || ap >= 16) {
@@ -87,7 +88,7 @@ public class APIServer {
         }
     }
     
-    private static void open(int port, int expiresSeconds, String htmlPath) throws IOException {
+    private static void open(int port, String htmlPath) throws IOException {
         try {
             QueuedThreadPool pool = new QueuedThreadPool();
             pool.setMaxThreads(500);
@@ -108,7 +109,7 @@ public class APIServer {
                 try {
                     servletHandler.addServlet(service, ((APIHandler) (service.getConstructor().newInstance())).getAPIPath());
                 } catch (InstantiationException | IllegalAccessException | NoSuchMethodException | InvocationTargetException e) {
-                    Log.getLog().warn(service.getName() + " instantiation error", e);
+                    Data.logger.warn(service.getName() + " instantiation error", e);
                     e.printStackTrace();
                 }
     
@@ -120,7 +121,7 @@ public class APIServer {
             if (htmlPath == null) {
                 handlerlist2.setHandlers(new Handler[]{servletHandler, new DefaultHandler()});
             } else {
-                FileHandler fileHandler = new FileHandler(expiresSeconds);
+                FileHandler fileHandler = new FileHandler();
                 fileHandler.setDirectoriesListed(true);
                 fileHandler.setWelcomeFiles(new String[]{"index.html"});
                 fileHandler.setResourceBase(htmlPath);

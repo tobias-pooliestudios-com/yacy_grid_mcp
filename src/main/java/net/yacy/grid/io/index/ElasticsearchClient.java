@@ -39,7 +39,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 
-import org.eclipse.jetty.util.log.Log;
 import org.elasticsearch.action.DocWriteResponse;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
 import org.elasticsearch.action.admin.cluster.stats.ClusterStatsAction;
@@ -68,6 +67,7 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.InetSocketTransportAddress;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentBuilder;
+import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.index.VersionType;
 import org.elasticsearch.index.query.BoolQueryBuilder;
 import org.elasticsearch.index.query.Operator;
@@ -79,11 +79,11 @@ import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.aggregations.AggregationBuilders;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms.Bucket;
-import org.elasticsearch.search.sort.SortBuilders;
-import org.elasticsearch.search.sort.SortOrder;
 import org.elasticsearch.transport.client.PreBuiltTransportClient;
 import org.joda.time.format.DateTimeFormatter;
 import org.joda.time.format.ISODateTimeFormat;
+
+import net.yacy.grid.mcp.Data;
 
 public class ElasticsearchClient {
 
@@ -118,7 +118,7 @@ public class ElasticsearchClient {
                 int port = Integer.parseInt(a.substring(p + 1));
                 tc.addTransportAddress(new InetSocketTransportAddress(i, port));
             } catch (UnknownHostException e) {
-                Log.getLog().warn(e);
+                Data.logger.warn("", e);
             }
         }
         this.elasticsearchClient = tc;
@@ -183,7 +183,7 @@ public class ElasticsearchClient {
                 .setUpdateAllTypes(true)
                 .setType("_default_").execute().actionGet();
         } catch (Throwable e) {
-            Log.getLog().warn(e);
+            Data.logger.warn("", e);
         };
     }
 
@@ -194,31 +194,31 @@ public class ElasticsearchClient {
                 .setUpdateAllTypes(true)
                 .setType("_default_").execute().actionGet();
         } catch (Throwable e) {
-            Log.getLog().warn(e);
+            Data.logger.warn("", e);
         };
     }
 
     public void setMapping(String indexName, String mapping) {
         try {
             this.elasticsearchClient.admin().indices().preparePutMapping(indexName)
-                .setSource(mapping)
+                .setSource(mapping, XContentType.JSON)
                 .setUpdateAllTypes(true)
                 .setType("_default_").execute().actionGet();
         } catch (Throwable e) {
-            Log.getLog().warn(e);
+            Data.logger.warn("", e);
         };
     }
 
     public void setMapping(String indexName, File json) {
         try {
             this.elasticsearchClient.admin().indices().preparePutMapping(indexName)
-                .setSource(new String(Files.readAllBytes(json.toPath()), StandardCharsets.UTF_8))
+                .setSource(new String(Files.readAllBytes(json.toPath()), StandardCharsets.UTF_8), XContentType.JSON)
                 .setUpdateAllTypes(true)
                 .setType("_default_")
                 .execute()
                 .actionGet();
         } catch (Throwable e) {
-            Log.getLog().warn(e);
+            Data.logger.warn("", e);
         };
     }
 
@@ -308,7 +308,7 @@ public class ElasticsearchClient {
                 .actionGet();
             return response.getHits().getTotalHits();
         } catch (Throwable e) {
-            Log.getLog().warn(e);
+            Data.logger.warn("", e);
             return 0;
         }
     }
@@ -322,7 +322,7 @@ public class ElasticsearchClient {
                 .actionGet();
             return response.getHits().getTotalHits();
         } catch (Throwable e) {
-            Log.getLog().warn(e);
+            Data.logger.warn("", e);
             return 0;
         }
     }
@@ -539,8 +539,8 @@ public class ElasticsearchClient {
         Long version = (Long) jsonMap.remove("_version");
         // put this to the index
         IndexResponse r = elasticsearchClient.prepareIndex(indexName, typeName, id).setSource(jsonMap)
-            .setVersion(version == null ? 1 : version.longValue())
-            .setVersionType(version == null ? VersionType.FORCE : VersionType.EXTERNAL)
+            //.setVersion(version == null ? 1 : version.longValue())
+            .setVersionType(VersionType.INTERNAL)
             .execute()
             .actionGet();
         if (version != null) jsonMap.put("_version", version); // to prevent side effects
@@ -556,7 +556,7 @@ public class ElasticsearchClient {
             try {Thread.sleep(regulator);} catch (InterruptedException e) {}
         }
         */
-        Log.getLog().info("elastic write entry to index " + indexName + ": " + (created ? "created":"updated") + ", " + duration + " ms" + (regulator == 0 ? "" : ", throttled with " + regulator + " ms"));
+        Data.logger.info("elastic write entry to index " + indexName + ": " + (created ? "created":"updated") + ", " + duration + " ms" + (regulator == 0 ? "" : ", throttled with " + regulator + " ms"));
         return created;
     }
 
@@ -580,8 +580,8 @@ public class ElasticsearchClient {
             if (be.id == null) continue;
             bulkRequest.add(
                     elasticsearchClient.prepareIndex(indexName, be.type, be.id).setSource(be.jsonMap)
-                        .setVersion(be.version == null ? 1 : be.version.longValue())
-                        .setVersionType(be.version == null ? VersionType.FORCE : VersionType.EXTERNAL));
+                        //.setVersion(be.version == null ? 1 : be.version.longValue())
+                        .setVersionType(VersionType.INTERNAL));
         }
         BulkResponse bulkResponse = bulkRequest.get();
         BulkWriteResult result = new BulkWriteResult();
@@ -602,7 +602,7 @@ public class ElasticsearchClient {
             regulator = (long) (throttling_factor * duration);
             try {Thread.sleep(regulator);} catch (InterruptedException e) {}
         }
-        Log.getLog().info("elastic write bulk to index " + indexName + ": " + jsonMapList.size() + " entries, " + result.created.size() + " created, " + result.errors.size() + " errors, " + duration + " ms" + (regulator == 0 ? "" : ", throttled with " + regulator + " ms") + ", " + ops + " objects/second");
+        Data.logger.info("elastic write bulk to index " + indexName + ": " + jsonMapList.size() + " entries, " + result.created.size() + " created, " + result.errors.size() + " errors, " + duration + " ms" + (regulator == 0 ? "" : ", throttled with " + regulator + " ms") + ", " + ops + " objects/second");
         return result;
     }
     
@@ -626,7 +626,7 @@ public class ElasticsearchClient {
     public static class BulkEntry {
         private String id;
         private String type;
-        private Long version;
+        //private Long version;
         public Map<String, Object> jsonMap;
         
         /**
@@ -637,10 +637,10 @@ public class ElasticsearchClient {
          * @param version the version number >= 0 for external versioning or null for forced updates without versioning
          * @param jsonMap the payload object
          */
-        public BulkEntry(final String id, final String type, final String timestamp_fieldname, final Long version, final Map<String, Object> jsonMap) {
+        public BulkEntry(final String id, final String type, final String timestamp_fieldname, final Map<String, Object> jsonMap) {
             this.id = id;
             this.type = type;
-            this.version = version;
+            //this.version = version;
             this.jsonMap = jsonMap;
             if (timestamp_fieldname != null && !this.jsonMap.containsKey(timestamp_fieldname)) this.jsonMap.put(timestamp_fieldname, utcFormatter.print(System.currentTimeMillis()));
         }
@@ -704,8 +704,8 @@ public class ElasticsearchClient {
         return map;
     }
     
-    public Query query(final String indexName, final QueryBuilder queryBuilder, String order_field, int timezoneOffset, int resultCount, int aggregationLimit, String... aggregationFields) {
-        return new Query(indexName,  queryBuilder, order_field, timezoneOffset, resultCount, aggregationLimit, aggregationFields);
+    public Query query(final String indexName, final QueryBuilder queryBuilder, int timezoneOffset, int from, int resultCount, int aggregationLimit, WebMapping... aggregationFields) {
+        return new Query(indexName,  queryBuilder, timezoneOffset, from, resultCount, aggregationLimit, aggregationFields);
     }
     
     public class Query {
@@ -723,23 +723,16 @@ public class ElasticsearchClient {
          * @param aggregationLimit - the maximum count of facet entities, not search results
          * @param aggregationFields - names of the aggregation fields. If no aggregation is wanted, pass no (zero) field(s)
          */
-        public Query(final String indexName, final QueryBuilder queryBuilder, String order_field, int timezoneOffset, int resultCount, int aggregationLimit, String... aggregationFields) {
+        public Query(final String indexName, final QueryBuilder queryBuilder, int timezoneOffset, int from, int resultCount, int aggregationLimit, WebMapping... aggregationFields) {
             // prepare request
             SearchRequestBuilder request = elasticsearchClient.prepareSearch(indexName)
                     .setSearchType(SearchType.QUERY_THEN_FETCH)
                     .setQuery(queryBuilder)
-                    .setFrom(0)
+                    .setFrom(from)
                     .setSize(resultCount);
             request.clearRescorers();
-            if (resultCount > 0) {
-                request.addSort(
-                        SortBuilders.fieldSort(order_field)
-                            .unmappedType(order_field)
-                            .order(SortOrder.DESC)
-                        );
-            }
-            for (String field: aggregationFields) {
-                request.addAggregation(AggregationBuilders.terms(field).field(field).minDocCount(1).size(aggregationLimit));
+            for (WebMapping field: aggregationFields) {
+                request.addAggregation(AggregationBuilders.terms(field.getSolrFieldName()).field(field.getSolrFieldName()).minDocCount(1).size(aggregationLimit));
             }
             // get response
             SearchResponse response = request.execute().actionGet();
@@ -757,8 +750,8 @@ public class ElasticsearchClient {
             // evaluate aggregation
             // collect results: fields
             this.aggregations = new HashMap<>();
-            for (String field: aggregationFields) {
-                Terms fieldCounts = response.getAggregations().get(field);
+            for (WebMapping field: aggregationFields) {
+                Terms fieldCounts = response.getAggregations().get(field.getSolrFieldName());
                 List<? extends Bucket> buckets = fieldCounts.getBuckets();
                 // aggregate double-tokens (matching lowercase)
                 Map<String, Long> checkMap = new HashMap<>();
@@ -779,7 +772,7 @@ public class ElasticsearchClient {
                         list.add(new AbstractMap.SimpleEntry<String, Long>(key, v));
                     }
                 }
-                aggregations.put(field, list);
+                aggregations.put(field.getSolrFieldName(), list);
                 //if (field.equals("place_country")) {
                     // special handling of country aggregation: add the country center as well
                 //}
