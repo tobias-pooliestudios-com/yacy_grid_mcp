@@ -62,23 +62,26 @@ import org.elasticsearch.action.search.SearchType;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.client.transport.NoNodeAvailableException;
 import org.elasticsearch.client.transport.TransportClient;
+import org.elasticsearch.cluster.block.ClusterBlockException;
 import org.elasticsearch.cluster.health.ClusterHealthStatus;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.InetSocketTransportAddress;
+import org.elasticsearch.common.transport.TransportAddress;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.index.VersionType;
 import org.elasticsearch.index.query.BoolQueryBuilder;
-import org.elasticsearch.index.query.Operator;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
-import org.elasticsearch.index.search.MatchQuery.ZeroTermsQuery;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.search.SearchHit;
+import org.elasticsearch.search.SearchHits;
 import org.elasticsearch.search.aggregations.AggregationBuilders;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms.Bucket;
+import org.elasticsearch.search.fetch.subphase.highlight.HighlightBuilder;
+import org.elasticsearch.search.fetch.subphase.highlight.HighlightField;
 import org.elasticsearch.transport.client.PreBuiltTransportClient;
 import org.joda.time.format.DateTimeFormatter;
 import org.joda.time.format.ISODateTimeFormat;
@@ -230,10 +233,6 @@ public class ElasticsearchClient {
     public String clusterStats() {
         ClusterStatsResponse r = this.elasticsearchClient.admin().cluster().prepareClusterStats().get();
         return r.toString();
-    }
-
-    public Map<String, String> nodeSettings() {
-        return this.elasticsearchClient.settings().getAsMap();
     }
     
     /**
@@ -538,16 +537,31 @@ public class ElasticsearchClient {
         // get the version number out of the json, if any is given
         Long version = (Long) jsonMap.remove("_version");
         // put this to the index
-        IndexResponse r = elasticsearchClient.prepareIndex(indexName, typeName, id).setSource(jsonMap)
-            //.setVersion(version == null ? 1 : version.longValue())
-            .setVersionType(VersionType.INTERNAL)
-            .execute()
-            .actionGet();
+        IndexResponse r = null;
+        try {
+            r = elasticsearchClient
+                .prepareIndex(indexName, typeName, id)
+                .setCreate(true)
+                .setSource(jsonMap)
+                //.setVersion(version == null ? 1 : version.longValue())
+                .setVersionType(VersionType.INTERNAL)
+                .execute()
+                .actionGet();
+        } catch (ClusterBlockException e) {
+            /*
+            elasticsearchClient.admin().indices().prepareUpdateSettings(indexName)   
+                .setSettings(Settings.builder()                     
+                    .put("index.number_of_replicas", 0)
+                )
+           .get();
+           */
+            throw e;
+        }
         if (version != null) jsonMap.put("_version", version); // to prevent side effects
         // documentation about the versioning is available at
         // https://www.elastic.co/blog/elasticsearch-versioning-support
         // TODO: error handling
-        boolean created = r.status() == RestStatus.CREATED; // true means created, false means updated
+        boolean created = r != null && r.status() == RestStatus.CREATED; // true means created, false means updated
         long duration = Math.max(1, System.currentTimeMillis() - start);
         long regulator = 0;
         /*
@@ -646,40 +660,6 @@ public class ElasticsearchClient {
         }
     }
 
-    /**
-     * Query with a string and boundaries.
-     * The string is supposed to be something that the user types in without a technical syntax.
-     * The mapping of the search terms into the index can be different according
-     * to a search type. Please see
-     * https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-match-query.html.
-     * A better way to do this would be the usage of a cursor.
-     * See the delete method to find out how cursors work.
-     * 
-     * @param q
-     *            a search query string
-     * @param operator
-     *            either AND or OR, the default operator for the query tokens
-     * @param offset
-     *            the first document number, 0 is the first one
-     * @param count
-     *            the number of documents to be returned
-     * @return a list of json objects, mapped as Map<String,Object> for each json
-     */
-    public List<Map<String, Object>> query(final String indexName, final String q, final Operator operator, final int offset, final int count, String... fieldNames) {
-        assert count > 1; // for smaller amounts, use the next method
-        SearchRequestBuilder request = elasticsearchClient.prepareSearch(indexName)
-            // .addFields("_all")
-            .setQuery(QueryBuilders.multiMatchQuery(q, fieldNames).operator(operator).zeroTermsQuery(ZeroTermsQuery.ALL)).setFrom(offset).setSize(count);
-        SearchResponse response = request.execute().actionGet();
-        SearchHit[] hits = response.getHits().getHits();
-        ArrayList<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
-        for (SearchHit hit : hits) {
-            Map<String, Object> map = hit.getSource();
-            result.add(map);
-        }
-        return result;
-    }
-
     public Map<String, Object> query(final String indexName, final String field_name, String field_value) {
         if (field_value == null || field_value.length() == 0) return null;
         // prepare request
@@ -700,51 +680,59 @@ public class ElasticsearchClient {
         SearchHit[] hits = response.getHits().getHits();
         if (hits.length == 0) return null;
         assert hits.length == 1;
-        Map<String, Object> map = hits[0].getSource();
+        Map<String, Object> map = hits[0].getSourceAsMap();
         return map;
     }
     
-    public Query query(final String indexName, final QueryBuilder queryBuilder, int timezoneOffset, int from, int resultCount, int aggregationLimit, WebMapping... aggregationFields) {
-        return new Query(indexName,  queryBuilder, timezoneOffset, from, resultCount, aggregationLimit, aggregationFields);
+    public Query query(final String indexName, final QueryBuilder queryBuilder, final QueryBuilder postFilter, final HighlightBuilder hb, int timezoneOffset, int from, int resultCount, int aggregationLimit, WebMapping... aggregationFields) {
+        return new Query(indexName,  queryBuilder, postFilter, hb, timezoneOffset, from, resultCount, aggregationLimit, aggregationFields);
     }
     
     public class Query {
         public List<Map<String, Object>> result;
+        public List<Map<String, HighlightField>> highlights;
         public int hitCount;
         public Map<String, List<Map.Entry<String, Long>>> aggregations;
 
         /**
-         * Search the local message cache using a elasticsearch query.
-         * @param q - the query, for aggregation this which should include a time frame in the form since:yyyy-MM-dd until:yyyy-MM-dd
-         * @param order_field - the field to order the results, i.e. Timeline.Order.CREATED_AT
+         * Searches using a elasticsearch query.
+         * @param indexName the name of the search index
+         * @param queryBuilder a query for the search
+         * @param postFilter a filter that does not affect aggregations
          * @param timezoneOffset - an offset in minutes that is applied on dates given in the query of the form since:date until:date
+         * @param from - a filter that is applied on the document date and excludes all documents older than from
          * @param resultCount - the number of messages in the result; can be zero if only aggregations are wanted
-         * @param dateHistogrammInterval - the date aggregation interval or null, if no aggregation wanted
          * @param aggregationLimit - the maximum count of facet entities, not search results
          * @param aggregationFields - names of the aggregation fields. If no aggregation is wanted, pass no (zero) field(s)
          */
-        public Query(final String indexName, final QueryBuilder queryBuilder, int timezoneOffset, int from, int resultCount, int aggregationLimit, WebMapping... aggregationFields) {
+        public Query(final String indexName, final QueryBuilder queryBuilder, final QueryBuilder postFilter, final HighlightBuilder hb, int timezoneOffset, int from, int resultCount, int aggregationLimit, WebMapping... aggregationFields) {
             // prepare request
             SearchRequestBuilder request = elasticsearchClient.prepareSearch(indexName)
                     .setSearchType(SearchType.QUERY_THEN_FETCH)
                     .setQuery(queryBuilder)
                     .setFrom(from)
                     .setSize(resultCount);
+            if (hb != null) request.highlighter(hb);
+            //HighlightBuilder hb = new HighlightBuilder().field("message").preTags("<foo>").postTags("<bar>");
+            if (postFilter != null) request.setPostFilter(postFilter);
             request.clearRescorers();
             for (WebMapping field: aggregationFields) {
                 request.addAggregation(AggregationBuilders.terms(field.getSolrFieldName()).field(field.getSolrFieldName()).minDocCount(1).size(aggregationLimit));
             }
             // get response
             SearchResponse response = request.execute().actionGet();
-            hitCount = (int) response.getHits().getTotalHits();
+            SearchHits searchHits = response.getHits();
+            hitCount = (int) searchHits.getTotalHits();
                     
             // evaluate search result
             //long totalHitCount = response.getHits().getTotalHits();
-            SearchHit[] hits = response.getHits().getHits();
+            SearchHit[] hits = searchHits.getHits();
             this.result = new ArrayList<Map<String, Object>>(hitCount);
+            this.highlights = new ArrayList<Map<String, HighlightField>>(hitCount);
             for (SearchHit hit: hits) {
-                Map<String, Object> map = hit.getSource();
+                Map<String, Object> map = hit.getSourceAsMap();
                 this.result.add(map);
+                this.highlights.add(hit.getHighlightFields());
             }
             
             // evaluate aggregation
@@ -780,7 +768,6 @@ public class ElasticsearchClient {
         }
     }
     
-    
     public List<Map<String, Object>> queryWithConstraints(final String indexName, final String fieldName, final String fieldValue, final Map<String, String> constraints, boolean latest) throws IOException {
         SearchRequestBuilder request = this.elasticsearchClient.prepareSearch(indexName)
                 .setSearchType(SearchType.QUERY_THEN_FETCH)
@@ -802,7 +789,7 @@ public class ElasticsearchClient {
         ArrayList<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
         SearchHit[] hits = response.getHits().getHits();
         for (SearchHit hit: hits) {
-            Map<String, Object> map = hit.getSource();
+            Map<String, Object> map = hit.getSourceAsMap();
             result.add(map);
         }
 
