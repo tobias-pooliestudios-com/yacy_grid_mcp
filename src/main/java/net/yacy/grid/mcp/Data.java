@@ -51,21 +51,24 @@ public class Data {
     public static GridStorage gridStorage;
     public static Logger logger;
     public static Map<String, String> config;
+    public static LogAppender logAppender;
     private static ElasticsearchClient index = null; // will be initialized on-the-fly
     
     //public static Swagger swagger;
     
     public static void init(File serviceData, Map<String, String> cc) {
+        PatternLayout layout = new PatternLayout("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %p %c %x - %m%n");
         logger = Logger.getRootLogger();
         logger.removeAllAppenders();
-        logger.addAppender(new ConsoleAppender(new PatternLayout("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %p %c %x - %m%n")));
+        logAppender = new LogAppender(layout, 10000);
+        logger.addAppender(logAppender);
+        logger.addAppender(new ConsoleAppender(layout));
         
         config = cc;
         /*
         try {
             swagger = new Swagger(new File(new File(approot, "conf"), "swagger.json"));
         } catch (UnsupportedEncodingException | FileNotFoundException e) {
-            e.printStackTrace();
         }
         */
         //swagger.getServlets().forEach(path -> System.out.println(swagger.getServlet(path).toString()));
@@ -150,7 +153,6 @@ public class Data {
                 Data.logger.info("Connected elasticsearch at " + getHost(elasticsearchAddress));
             } catch (IOException | NoNodeAvailableException e) {
                 index = null; // index not available
-                e.printStackTrace();
                 Data.logger.info("Failed connecting elasticsearch at " + getHost(elasticsearchAddress) + ": " + e.getMessage(), e);
             } else {
                 Data.logger.info("no web index mapping available, no connection to elasticsearch attempted");
