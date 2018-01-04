@@ -36,57 +36,47 @@ import net.yacy.grid.tools.DateParser;
 public class Query {
 
     private HttpServletRequest request;
-    private Map<String, String> qm;
-    private String clientHost;
+    private Map<String, byte[]> qm;
     
     public Query(final HttpServletRequest request) {
         this.qm = new LinkedHashMap<>();
         if (request != null) for (Map.Entry<String, String[]> entry: request.getParameterMap().entrySet()) {
-            this.qm.put(entry.getKey(), entry.getValue()[0]);
+            this.qm.put(entry.getKey(), entry.getValue()[0].getBytes(StandardCharsets.UTF_8));
         }
         this.request = request;
-        
-        // discover remote host
-        this.clientHost = request.getRemoteHost();
-        String XRealIP = request.getHeader("X-Real-IP");
-        if (XRealIP != null && XRealIP.length() > 0) this.clientHost = XRealIP; // get IP through nginx config "proxy_set_header X-Real-IP $remote_addr;"
     }
     public Query initGET(final Map<String, String> q) {
-        this.qm = q;
+        q.forEach((k, v) -> this.qm.put(k, v.getBytes(StandardCharsets.UTF_8)));
         return this;
     }
     public Query initGET(final JSONObject json) {
-        json.keySet().forEach(k -> this.qm.put(k, json.getString(k)));
+        json.keySet().forEach(k -> this.qm.put(k, json.getString(k).getBytes(StandardCharsets.UTF_8)));
         return this;
     }
-    public Query initPOST(final Map<String, byte[]> map) {
-        this.qm = new LinkedHashMap<>();
-        for (Map.Entry<String, byte[]> entry: map.entrySet()) {
-        byte[] b = entry.getValue();
-        this.qm.put(entry.getKey(), b == null ? "" : new String(b, 0, b.length, StandardCharsets.UTF_8));
-    }
+    public Query initPOST(final Map<String, byte[]> qm) {
+        this.qm = qm;
         return this;
     }
     public String getClientHost() {
-        return this.clientHost;
+        return this.request.getRemoteHost();
     }
     public boolean isLocalhostAccess() {
         return RemoteAccess.isLocalhost(getClientHost());
     }
     public String get(String key) {
         String val = this.request == null ? null : this.request.getParameter(key);
-        if (val == null && this.qm.containsKey(key)) return this.qm.get(key);
+        if (val == null && this.qm.containsKey(key)) return new String(this.qm.get(key), StandardCharsets.UTF_8);
         return val;
     }
     public String get(String key, String dflt) {
         String val = this.request == null ? null : this.request.getParameter(key);
-        if (val == null && this.qm.containsKey(key)) return this.qm.get(key);
+        if (val == null && this.qm.containsKey(key)) return new String(this.qm.get(key), StandardCharsets.UTF_8);
         return val == null ? dflt : val;
     }
     public byte[] get(String key, byte[] dflt) {
         if (this.qm.containsKey(key)) {
-            String s = this.qm.get(key);
-            if (s != null) return s.getBytes(StandardCharsets.UTF_8);
+            byte[] b = this.qm.get(key);
+            if (b != null) return b;
         }
         assert false; // that should not happen!
         String val = this.request == null ? null : this.request.getParameter(key);
@@ -145,7 +135,8 @@ public class Query {
         this.qm.entrySet().stream()
             .filter(e -> !e.getKey().equals("password"))
             .filter(e -> !e.getKey().equals("asset"))
-            .forEach(e -> outcopy.put(e.getKey(), e.getValue()));
+            .forEach(e -> outcopy.put(e.getKey(), new String(e.getValue(), StandardCharsets.UTF_8)));
         return outcopy.toString().replaceAll(", ", "&").replaceFirst("\\{", "").replaceAll("\\}", "").replaceAll(" ", "%20");
-    }
+     }
+    
 }
