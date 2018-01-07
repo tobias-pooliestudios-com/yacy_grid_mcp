@@ -48,8 +48,8 @@ import net.yacy.grid.mcp.api.messages.ClearService;
 import net.yacy.grid.mcp.api.messages.PeekService;
 import net.yacy.grid.mcp.api.messages.ReceiveService;
 import net.yacy.grid.mcp.api.messages.SendService;
-import net.yacy.grid.tools.Digest;
 import net.yacy.grid.tools.JSONList;
+import net.yacy.grid.tools.MultiProtocolURL;
 
 /**
  * The Master Connect Program
@@ -112,7 +112,7 @@ public class MCP {
         		   byte[] source = asset.getPayload();
         		   jsonlist = new JSONList(new ByteArrayInputStream(source));
         	   } catch (IOException e) {
-        		   Data.logger.warn("could not read asset from storage: " + sourceasset_path, e);
+        		   Data.logger.warn("MCP.processAction could not read asset from storage: " + sourceasset_path, e);
         		   return false;
         	   }
         	   
@@ -125,19 +125,19 @@ public class MCP {
                    if (date == null && json.has(WebMapping.load_date_dt.getSolrFieldName())) date = WebMapping.load_date_dt.getSolrFieldName();
                    if (date == null && json.has(WebMapping.fresh_date_dt.getSolrFieldName())) date = WebMapping.fresh_date_dt.getSolrFieldName();
                    String url = json.getString(WebMapping.url_s.getSolrFieldName());
-                   String id = Digest.encodeMD5Hex(url);
+                   String id = MultiProtocolURL.getDigest(url);
                    boolean created = Data.getIndex().writeMap("web", json.toMap(), "crawler", id);
-                   Data.logger.info("indexed (" + (created ? "created" : "updated")+ "): " + url);
+                   Data.logger.info("MCP.processAction indexed " + ((line + 1)/2)  + "/" + jsonlist.length()/2 + "(" + (created ? "created" : "updated")+ "): " + url);
                    //BulkEntry be = new BulkEntry(json.getString("url_s"), "crawler", date, null, json.toMap());
                    //bulk.add(be);
                } catch (JSONException je) {
                    Data.logger.warn("", je);
                }
                //Data.index.writeMapBulk("web", bulk);
-               Data.logger.info("processed indexing message from queue: " + sourceasset_path);
+               Data.logger.info("MCP.processAction processed indexing message from queue: " + sourceasset_path);
                return true;
            } catch (Throwable e) {
-               Data.logger.warn("", e);
+               Data.logger.warn("MCP.processAction", e);
                return false;
            }
        }
