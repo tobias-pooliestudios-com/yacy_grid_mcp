@@ -21,10 +21,13 @@ package net.yacy.grid.io.assets;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
+import java.util.HashMap;
 
 import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
+import org.apache.commons.net.ftp.FTPFile;
 import org.apache.commons.net.ftp.FTPReply;
 
 import net.yacy.grid.mcp.Data;
@@ -36,12 +39,14 @@ public class FTPStorageFactory implements StorageFactory<byte[]> {
     private String server, username, password;
     private int port;
     private Storage<byte[]> ftpClient;
+    private boolean deleteafterread;
     
-    public FTPStorageFactory(String server, int port, String username, String password) throws IOException {
+    public FTPStorageFactory(String server, int port, String username, String password, boolean deleteafterread) throws IOException {
         this.server = server;
         this.username = username == null ? "" : username;
         this.password = password == null ? "" : password;
         this.port = port;
+        this.deleteafterread = deleteafterread;
 
         this.ftpClient = new Storage<byte[]>() {
 
@@ -85,8 +90,8 @@ public class FTPStorageFactory implements StorageFactory<byte[]> {
                     ftp.enterLocalPassiveMode();
                     boolean success = ftp.storeFile(file, new ByteArrayInputStream(asset));
                     long t3 = System.currentTimeMillis();
+                    if (!success) throw new IOException("storage to path " + path + " was not successful (storeFile=false)");
                     Data.logger.debug("FTPStorageFactory.store ftp store successfull: check connection = " + (t1 - t0) + ", cdPath = " + (t2 - t1) + ", store = " + (t3 - t2));
-                    if (!success) throw new IOException("storage to path " + path + " was not successful");
                 } catch (IOException e) {
                     throw e;
                 } finally {
@@ -99,16 +104,31 @@ public class FTPStorageFactory implements StorageFactory<byte[]> {
             public Asset<byte[]> load(String path) throws IOException {
                 FTPClient ftp = initConnection();
                 ByteArrayOutputStream baos = null;
+                byte[] b = null;
                 try {
                     String file = cdPath(ftp, path);
                     baos = new ByteArrayOutputStream();
                     ftp.retrieveFile(file, baos);
+                    b = baos.toByteArray();
+                    if (FTPStorageFactory.this.deleteafterread) try {
+                        boolean deleted = ftp.deleteFile(file);
+                        FTPFile[] remaining = ftp.listFiles();
+                        if (remaining.length == 0) {
+                            ftp.cwd("/");
+                            if (path.startsWith("/")) path = path.substring(1);
+                            int p = path.indexOf('/');
+                            if (p > 0) path = path.substring(0, p);
+                            ftp.removeDirectory(path);
+                        }
+                    } catch (Throwable e) {
+                        Data.logger.warn("FTPStorageFactory.load failed to remove asset " + path, e );
+                    }
                 } catch (IOException e) {
                     throw e;
                 } finally {
                     if (ftp != null) try {ftp.disconnect();} catch (Throwable ee) {}
                 }
-                return new Asset<byte[]>(FTPStorageFactory.this, baos == null ? null : baos.toByteArray());
+                return new Asset<byte[]>(FTPStorageFactory.this, b);
             }
 
             @Override
@@ -175,4 +195,20 @@ public class FTPStorageFactory implements StorageFactory<byte[]> {
         this.ftpClient.close();
     }
 
+    public static void main(String[] args) {
+        try {
+            Data.init(new File("data"), new HashMap<String, String>());
+            FTPStorageFactory ftpc = new FTPStorageFactory("127.0.0.1", 2121, "anonymous", "yacy", true);
+            Storage<byte[]> storage = ftpc.getStorage();
+            String path = "test/file";
+            String data = "123";
+            storage.store(path, data.getBytes());
+            Asset<byte[]> b = storage.load(path);
+            System.out.println(new String(b.getPayload()));
+            Data.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+    
 }
