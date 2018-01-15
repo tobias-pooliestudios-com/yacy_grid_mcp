@@ -19,6 +19,8 @@
 
 package net.yacy.grid.http;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.text.ParseException;
 import java.util.Date;
@@ -29,7 +31,11 @@ import java.util.Set;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.json.JSONException;
 import org.json.JSONObject;
+import org.json.JSONTokener;
+
+import com.google.common.io.ByteStreams;
 
 import net.yacy.grid.tools.DateParser;
 
@@ -53,8 +59,8 @@ public class Query {
         json.keySet().forEach(k -> this.qm.put(k, json.getString(k).getBytes(StandardCharsets.UTF_8)));
         return this;
     }
-    public Query initPOST(final Map<String, byte[]> qm) {
-        this.qm = qm;
+    public Query initPOST(final Map<String, byte[]> map) {
+        if (this.qm == null) this.qm = map; else this.qm.putAll(map);
         return this;
     }
     public String getClientHost() {
@@ -109,6 +115,24 @@ public class Query {
         } catch (ParseException e) {
             return dflt;
         }
+    }
+    public JSONObject getJSONBody() {
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ByteStreams.copy(request.getInputStream(), baos);
+            baos.close();
+            String data = new String(baos.toByteArray(), StandardCharsets.UTF_8);
+            if (data == null || data.length() == 0) return null;
+            data = data.trim();
+            if (data.charAt(0) =='{' && data.charAt(data.length() - 1) == '}') try {
+                return new JSONObject(new JSONTokener(data));
+            } catch (JSONException e) {
+                return null;
+            }
+            return null;
+        } catch (IOException e) {
+        }
+        return null;
     }
     public Set<String> getKeys() {
         if (this.request == null || this.request.getParameterMap().size() == 0) return this.qm.keySet();
