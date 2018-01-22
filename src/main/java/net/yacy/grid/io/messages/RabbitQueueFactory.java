@@ -20,7 +20,6 @@
 package net.yacy.grid.io.messages;
 
 import com.rabbitmq.client.ConnectionFactory;
-import com.rabbitmq.client.Envelope;
 import com.rabbitmq.client.GetResponse;
 import com.rabbitmq.client.MessageProperties;
 
@@ -33,8 +32,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-import com.rabbitmq.client.AMQP.Queue.DeleteOk;
 import com.rabbitmq.client.AlreadyClosedException;
 import com.rabbitmq.client.Channel;
 
@@ -55,7 +54,7 @@ public class RabbitQueueFactory implements QueueFactory<byte[]> {
     private Connection connection;
     private Channel channel;
     private Map<String, Queue<byte[]>> queues;
-    private boolean lazy;
+    private AtomicBoolean lazy;
     
     /**
      * create a queue factory for a rabbitMQ message server
@@ -68,7 +67,7 @@ public class RabbitQueueFactory implements QueueFactory<byte[]> {
         this.port = port;
         this.username = username;
         this.password = password;
-        this.lazy = lazy;
+        this.lazy = new AtomicBoolean(lazy);
         this.init();
     }
     
@@ -134,15 +133,22 @@ public class RabbitQueueFactory implements QueueFactory<byte[]> {
         }
 
         private void connect() throws IOException {
-        	Map<String, Object> arguments = new HashMap<>();
-        	arguments.put("x-queue-mode", "lazy"); // we want to minimize memory usage; see http://www.rabbitmq.com/lazy-queues.html
-        	try {
-        		RabbitQueueFactory.this.channel.queueDeclare(this.queueName, true, false, false, lazy ? arguments : null);
-        	} catch (AlreadyClosedException e) {
-        		lazy = !lazy;
-                channel = connection.createChannel();
-            	// may happen if a queue was previously not declared "lazy". So we try non-lazy queue setting now.
-            	RabbitQueueFactory.this.channel.queueDeclare(this.queueName, true, false, false, lazy ? arguments : null);
+            	Map<String, Object> arguments = new HashMap<>();
+            	arguments.put("x-queue-mode", "lazy"); // we want to minimize memory usage; see http://www.rabbitmq.com/lazy-queues.html
+            	boolean lazys = lazy.get();
+            	try {
+            		RabbitQueueFactory.this.channel.queueDeclare(this.queueName, true, false, false, lazys ? arguments : null);
+            	} catch (AlreadyClosedException e) {
+            		lazys = !lazys;
+            		try {
+            		    channel = connection.createChannel();
+            		    // may happen if a queue was previously not declared "lazy". So we try non-lazy queue setting now.
+            		    RabbitQueueFactory.this.channel.queueDeclare(this.queueName, true, false, false, lazys ? arguments : null);
+            		    // if this is successfull, set the new lazy value
+            		    lazy.set(lazys);
+            		} catch (AlreadyClosedException ee) {
+            		    throw new IOException(ee.getMessage());
+            		}
             }
         }
         
@@ -193,12 +199,12 @@ public class RabbitQueueFactory implements QueueFactory<byte[]> {
             Throwable ee = null;
             while (System.currentTimeMillis() < termination) {
                 try {
-                    GetResponse response = channel.basicGet(this.queueName, false);
+                    GetResponse response = channel.basicGet(this.queueName, true);
                     if (response != null) {
-                    	Envelope envelope = response.getEnvelope();
-                    	long deliveryTag = envelope.getDeliveryTag();
-                        channel.basicAck(deliveryTag, false);
-                    	return response.getBody();
+                    	    //Envelope envelope = response.getEnvelope();
+                    	    //long deliveryTag = envelope.getDeliveryTag();
+                        //channel.basicAck(deliveryTag, false);
+                        return response.getBody();
                     }
                     //Data.logger.warn("receive failed: response empty");
                 } catch (Throwable e) {
