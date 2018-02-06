@@ -38,6 +38,7 @@ import net.yacy.grid.io.index.ElasticsearchClient;
 import net.yacy.grid.io.index.WebMapping;
 import net.yacy.grid.io.index.YaCyQuery;
 import net.yacy.grid.mcp.Data;
+import net.yacy.grid.tools.Classification;
 import net.yacy.grid.tools.DateParser;
 
 /**
@@ -62,10 +63,14 @@ public class YaCySearchService extends ObjectAPIHandler implements APIHandler {
         String callback = call.get("callback", "");
         boolean jsonp = callback != null && callback.length() > 0;
         boolean minified = call.get("minified", false);
+        boolean explain = call.get("explain", false);
         String query = call.get("query", "");
-        //String contentdom = call.get("contentdom", "text");
-        int maximumRecords = call.get("maximumRecords", 10);
-        int startRecord = call.get("startRecord", 0);
+        Classification.ContentDomain contentdom =  Classification.ContentDomain.contentdomParser(call.get("contentdom", "all"));
+        String collection = call.get("collection", ""); // important: call arguments may overrule parsed collection values if not empty. This can be used for authentified indexes!
+        collection = collection.replace(',', '|'); // to be compatible with the site-operator of GSA, we use a vertical pipe symbol here to divide collections.
+        String[] collections = collection.length() == 0 ? new String[0] : collection.split("\\|");
+        int maximumRecords = call.get("maximumRecords", call.get("rows", call.get("num", 10)));
+        int startRecord = call.get("startRecord", call.get("start", 0));
         //int meanCount = call.get("meanCount", 5);
         int timezoneOffset = call.get("timezoneOffset", -1);
         //String nav = call.get("nav", "");
@@ -76,10 +81,10 @@ public class YaCySearchService extends ObjectAPIHandler implements APIHandler {
         List<WebMapping> facetFieldMapping = new ArrayList<>();
         for (String s: facetFields.split(",")) facetFieldMapping.add(WebMapping.valueOf(s));
         
-        QueryBuilder qb = YaCyQuery.simpleQueryBuilder(query);
+        QueryBuilder qb = new YaCyQuery(query, collections, contentdom, timezoneOffset).queryBuilder;
         ElasticsearchClient.Query eq = Data.getIndex().query(
                 "web", qb, null, null, timezoneOffset, startRecord, maximumRecords,
-                facetLimit, facetFieldMapping.toArray(new WebMapping[facetFieldMapping.size()]));
+                facetLimit, explain, facetFieldMapping.toArray(new WebMapping[facetFieldMapping.size()]));
 
         JSONObject json = new JSONObject(true);
         JSONArray channels = new JSONArray();
@@ -94,11 +99,21 @@ public class YaCySearchService extends ObjectAPIHandler implements APIHandler {
         channel.put("searchTerms", query);
         channel.put("totalResults", Integer.toString(eq.hitCount));
         channel.put("items", items);
-        eq.result.forEach(map -> {
+        
+        List<Map<String, Object>> result = eq.results;
+        List<String> explanations = eq.explanations;
+        for (int hitc = 0; hitc < result.size(); hitc++) {
+            Map<String, Object> map = result.get(hitc);
             JSONObject hit = new JSONObject(true);
             List<?> title = (List<?>) map.get(WebMapping.title.getSolrFieldName());
             String titleString = title == null || title.isEmpty() ? "" : title.iterator().next().toString();
             Object link = map.get(WebMapping.url_s.getSolrFieldName());
+            if (Classification.ContentDomain.IMAGE == contentdom) {
+                hit.put("url", link); // the url before we extract the link
+                link = YaCyQuery.pickBestImage(map, (String) link);
+                hit.put("icon", link);
+                hit.put("image", link);
+            }
             List<?> description = (List<?>) map.get(WebMapping.description_txt.getSolrFieldName());
             String descriptionString = description == null || description.isEmpty() ? "" : description.iterator().next().toString();
             String last_modified = (String) map.get(WebMapping.last_modified.getSolrFieldName());
@@ -115,8 +130,11 @@ public class YaCySearchService extends ObjectAPIHandler implements APIHandler {
             hit.put("size", size.toString());
             hit.put("sizename", size_string);
             hit.put("host", host);
+            if (explain) {
+                hit.put("explanation", explanations.get(hitc));
+            }
             items.put(hit);
-        });
+        };
         JSONArray navigation = new JSONArray();
         channel.put("navigation", navigation);
         
