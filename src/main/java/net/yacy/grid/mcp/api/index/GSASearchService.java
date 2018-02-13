@@ -38,6 +38,7 @@ import net.yacy.grid.http.ObjectAPIHandler;
 import net.yacy.grid.http.Query;
 import net.yacy.grid.http.ServiceResponse;
 import net.yacy.grid.io.index.ElasticsearchClient;
+import net.yacy.grid.io.index.Sort;
 import net.yacy.grid.io.index.WebMapping;
 import net.yacy.grid.io.index.YaCyQuery;
 import net.yacy.grid.mcp.Data;
@@ -46,6 +47,14 @@ import net.yacy.grid.tools.DateParser;
 import net.yacy.grid.tools.Digest;
 
 /**
+ * This is a implementation of the GSA Google Search Appliance API as documented in
+ * https://www.google.com/support/enterprise/static/gsa/docs/admin/74/gsa_doc_set/xml_reference/index.html
+ * 
+ * We re-implement here functionality as given in the YaCy/1 implementation from
+ * https://github.com/yacy/yacy_search_server/blob/master/source/net/yacy/http/servlets/GSAsearchServlet.java
+ * which used a de-published API reference from
+ * https://developers.google.com/search-appliance/documentation/614/xml_reference 
+ * 
  * test: call
  * http://127.0.0.1:8100/yacy/grid/mcp/index/gsasearch.xml?q=*
  * compare with
@@ -77,13 +86,14 @@ public class GSASearchService extends ObjectAPIHandler implements APIHandler {
         String[] sites = site.length() == 0 ? new String[0] : site.split("\\|");
         int timezoneOffset = call.get("timezoneOffset", -1);
         boolean explain = call.get("explain", false);
+        Sort sort = new Sort(call.get("sort", ""));
         String queryXML = XML.escape(q);
         
         // prepare a query
         QueryBuilder termQuery = new YaCyQuery(q, sites, contentdom, timezoneOffset).queryBuilder;
 
         HighlightBuilder hb = new HighlightBuilder().field(WebMapping.text_t.getSolrFieldName()).preTags("").postTags("").fragmentSize(140);
-        ElasticsearchClient.Query query = Data.getIndex().query("web", termQuery, null, hb, timezoneOffset, start, num, 0, explain);
+        ElasticsearchClient.Query query = Data.getIndex().query("web", termQuery, null, sort, hb, timezoneOffset, start, num, 0, explain);
         List<Map<String, Object>> result = query.results;
         List<String> explanations = query.explanations;
  

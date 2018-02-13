@@ -22,12 +22,18 @@ package net.yacy.grid.io.messages;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.regex.Pattern;
 
-import net.yacy.grid.QueueName;
 import net.yacy.grid.Services;
 import net.yacy.grid.YaCyServices;
 import net.yacy.grid.mcp.Data;
 
+/**
+ * This GridBroker is a local implementation of the broker interface, using either a connection to a RabbitMQ
+ * or another MCP on the grid. As a fail-over, the PeerBroker is used to connect a local database as broker.
+ * 
+ * Key element of the usage of an external MCP as broker is the connection 
+ */
 public class GridBroker extends PeerBroker implements Broker<byte[]> {
 
     private QueueFactory<byte[]> rabbitConnector;
@@ -52,7 +58,7 @@ public class GridBroker extends PeerBroker implements Broker<byte[]> {
         this.lazy = lazy;
     }
     
-    public static String serviceQueueName(Services service, QueueName queue) {
+    public static String serviceQueueName(Services service, GridQueue queue) {
         return service.name() + '_' + queue.name();
     }
 
@@ -105,12 +111,22 @@ public class GridBroker extends PeerBroker implements Broker<byte[]> {
         }
     }
 
+    private final static Pattern SPACE2 = Pattern.compile("  ");
+    
     private final static String messagePP(byte[] message) {
-        return ((message == null) ? "NULL" : new String(message, 0, Math.min(1000, message.length), StandardCharsets.UTF_8).replaceAll(" *", " ").replace('\n', ' '));
+        if (message == null) return "NULL";
+        String m = new String(message, 0, Math.min(1000, message.length), StandardCharsets.UTF_8);
+        m = m.replace('\n', ' ');
+        while (true) {
+            int l = m.length();
+            m = SPACE2.matcher(m).replaceAll(" ");
+            if (m.length() == l) break;
+        }
+        return m;
     }
     
     @Override
-    public QueueFactory<byte[]> send(Services serviceName, QueueName queueName, byte[] message) throws IOException {
+    public QueueFactory<byte[]> send(Services serviceName, GridQueue queueName, byte[] message) throws IOException {
         if (this.rabbitConnector == null && this.rabbitMQ_host != null) {
             // try to connect again..
             connectRabbitMQ(this.rabbitMQ_host, this.rabbitMQ_port, this.rabbitMQ_username, this.rabbitMQ_password);
@@ -143,7 +159,7 @@ public class GridBroker extends PeerBroker implements Broker<byte[]> {
     }
 
     @Override
-    public MessageContainer<byte[]> receive(Services serviceName, QueueName queueName, long timeout) throws IOException {
+    public MessageContainer<byte[]> receive(Services serviceName, GridQueue queueName, long timeout) throws IOException {
         if (this.rabbitConnector == null && this.rabbitMQ_host != null) {
             // try to connect again..
             connectRabbitMQ(this.rabbitMQ_host, this.rabbitMQ_port, this.rabbitMQ_username, this.rabbitMQ_password);
@@ -183,7 +199,7 @@ public class GridBroker extends PeerBroker implements Broker<byte[]> {
     }
 
     @Override
-    public AvailableContainer available(Services serviceName, QueueName queueName) throws IOException {
+    public AvailableContainer available(Services serviceName, GridQueue queueName) throws IOException {
         if (this.rabbitConnector == null && this.rabbitMQ_host != null) {
             // try to connect again..
             connectRabbitMQ(this.rabbitMQ_host, this.rabbitMQ_port, this.rabbitMQ_username, this.rabbitMQ_password);
@@ -214,7 +230,7 @@ public class GridBroker extends PeerBroker implements Broker<byte[]> {
     }
     
     @Override
-    public QueueFactory<byte[]> clear(Services serviceName, QueueName queueName) throws IOException {
+    public QueueFactory<byte[]> clear(Services serviceName, GridQueue queueName) throws IOException {
         if (this.rabbitConnector == null && this.rabbitMQ_host != null) {
             // try to connect again..
             connectRabbitMQ(this.rabbitMQ_host, this.rabbitMQ_port, this.rabbitMQ_username, this.rabbitMQ_password);
