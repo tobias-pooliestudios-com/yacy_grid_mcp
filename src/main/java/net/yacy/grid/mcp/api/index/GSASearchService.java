@@ -19,11 +19,8 @@
 
 package net.yacy.grid.mcp.api.index;
 
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -58,6 +55,11 @@ import net.yacy.grid.tools.Digest;
  * 
  * test: call
  * http://127.0.0.1:8100/yacy/grid/mcp/index/gsasearch.xml?q=*
+ * http://127.0.0.1:8100/yacy/grid/mcp/index/gsasearch.xml?q=*%20daterange:2017-01-01..2018-01-01
+ * http://127.0.0.1:8100/yacy/grid/mcp/index/gsasearch.xml?q=site:heise.de
+ * http://127.0.0.1:8100/yacy/grid/mcp/index/gsasearch.xml?q=*&as_sitesearch=heise.de
+ * http://127.0.0.1:8100/yacy/grid/mcp/index/gsasearch.xml?q=filetype:pdf
+ * http://127.0.0.1:8100/yacy/grid/mcp/index/gsasearch.xml?q=*&as_filetype=pdf
  * compare with
  * http://localhost:9200/web/crawler/_search?q=*:*
  */
@@ -66,9 +68,6 @@ public class GSASearchService extends ObjectAPIHandler implements APIHandler {
     private static final long serialVersionUID = 8578478303031749975L;
     public static final String NAME = "gsasearch";
 
-    // GSA date formatter (short form of ISO8601 date format)
-    private static final String PATTERN_GSAFS = "yyyy-MM-dd";
-    public static final SimpleDateFormat FORMAT_GSAFS = new SimpleDateFormat(PATTERN_GSAFS, Locale.US);
     
     @Override
     public String getAPIPath() {
@@ -85,13 +84,13 @@ public class GSASearchService extends ObjectAPIHandler implements APIHandler {
         Classification.ContentDomain contentdom =  Classification.ContentDomain.contentdomParser(call.get("contentdom", "all"));
         String site = call.get("site", call.get("collection", "").replace(',', '|'));  // important: call arguments may overrule parsed collection values if not empty. This can be used for authentified indexes!
         String[] sites = site.length() == 0 ? new String[0] : site.split("\\|");
-        int timezoneOffset = call.get("timezoneOffset", -1);
+        int timezoneOffset = call.get("timezoneOffset", 0);
         boolean explain = call.get("explain", false);
         Sort sort = new Sort(call.get("sort", ""));
         String translatedQ = q;
         
         String as_filetype = call.get("as_filetype", "");
-        String as_ft = call.get("as_ft", ""); // refers to as_filetype: only 'i' (include) or 'e' (exclude) allowed
+        String as_ft = call.get("as_ft", "i"); // refers to as_filetype: only 'i' (include) or 'e' (exclude) allowed
         if (as_filetype.length() > 0) translatedQ += (as_ft.equals("i") ? " " : " -") + "filetype:" + as_filetype;
         String as_sitesearch = call.get("as_sitesearch", "");
         String as_dt = call.get("as_dt", "i"); // refers to as_sitesearch: only 'i' (include) or 'e' (exclude) allowed
@@ -99,21 +98,8 @@ public class GSASearchService extends ObjectAPIHandler implements APIHandler {
         
         String queryXML = XML.escape(q);
         
-        
-        String dr = call.get("daterange", "");
-        Date from = null;
-        Date to = null;
-        if (dr.length() > 0) {
-            String from_to[] = dr.endsWith("..") ? new String[]{dr.substring(0, dr.length() - 2), ""} : dr.startsWith("..") ? new String[]{"", dr.substring(2)} : dr.split("\\.\\.");
-            if (from_to.length == 2)  {
-            	from = this.parseGSAFS(from_to[0]);
-            	to = this.parseGSAFS(from_to[1]);
-            	if (to != null) to.setTime(to.getTime() + 24L * 60L * 60L * 1000L); // we add a day because the day is inclusive
-            }
-        }
-        
         // prepare a query
-        QueryBuilder termQuery = new YaCyQuery(translatedQ, sites, from, to, contentdom, timezoneOffset).queryBuilder;
+        QueryBuilder termQuery = new YaCyQuery(translatedQ, sites, contentdom, timezoneOffset).queryBuilder;
 
         HighlightBuilder hb = new HighlightBuilder().field(WebMapping.text_t.getSolrFieldName()).preTags("").postTags("").fragmentSize(140);
         ElasticsearchClient.Query query = Data.getIndex().query("web", termQuery, null, sort, hb, timezoneOffset, start, num, 0, explain);
@@ -168,7 +154,7 @@ public class GSASearchService extends ObjectAPIHandler implements APIHandler {
             //String host = (String) map.get(WebMapping.host_s.getSolrFieldName());
 	        sb.append("<R N=\"").append(Integer.toString(hit.getAndIncrement())).append("\" MIME=\"text/html\">\n");
 	        sb.append("<T>").append(titleXML).append("</T>\n");
-	        sb.append("<FS NAME=\"date\" VALUE=\"").append(formatGSAFS(last_modified_date)).append("\"/>\n");
+	        sb.append("<FS NAME=\"date\" VALUE=\"").append(DateParser.formatGSAFS(last_modified_date)).append("\"/>\n");
 	        sb.append("<CRAWLDATE>").append(DateParser.formatRFC1123(last_modified_date)).append("</CRAWLDATE>\n");
 	        sb.append("<LANG>en</LANG>\n");
 	        sb.append("<U>").append(linkXML).append("</U>\n");
@@ -188,36 +174,6 @@ public class GSASearchService extends ObjectAPIHandler implements APIHandler {
         sb.append("</GSP>\n");
 
         return new ServiceResponse(sb.toString());
-    }
-
-    
-    /**
-     * Format date for GSA (short form of ISO8601 date format)
-     * @param date
-     * @return datestring "yyyy-mm-dd"
-     * @see ISO8601Formatter
-     */
-    public final String formatGSAFS(final Date date) {
-        if (date == null) return "";
-        synchronized (GSASearchService.FORMAT_GSAFS) {
-            final String s = GSASearchService.FORMAT_GSAFS.format(date);
-            return s;
-        }
-    }
-    
-
-    /**
-     * Parse GSA date string (short form of ISO8601 date format)
-     * @param datestring
-     * @return date or null
-     * @see ISO8601Formatter
-     */
-    public final Date parseGSAFS(final String datestring) {
-        try {
-            return FORMAT_GSAFS.parse(datestring);
-        } catch (final ParseException e) {
-            return null;
-        }
     }
 
     
