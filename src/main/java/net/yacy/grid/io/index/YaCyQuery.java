@@ -28,13 +28,11 @@ import java.util.Date;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.apache.http.HttpStatus;
-import org.apache.lucene.search.TermQuery;
 import org.elasticsearch.index.query.BoolQueryBuilder;
 import org.elasticsearch.index.query.MatchAllQueryBuilder;
 import org.elasticsearch.index.query.MultiMatchQueryBuilder;
@@ -43,12 +41,12 @@ import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.index.query.RangeQueryBuilder;
 import org.elasticsearch.index.query.TermQueryBuilder;
-import org.elasticsearch.index.query.TermsQueryBuilder;
 import org.elasticsearch.index.search.MatchQuery.ZeroTermsQuery;
 
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
 
+import net.yacy.grid.io.index.BoostsFactory.Boosts;
 import net.yacy.grid.mcp.Data;
 import net.yacy.grid.tools.Classification;
 import net.yacy.grid.tools.DateParser;
@@ -60,7 +58,6 @@ public class YaCyQuery {
     private static char dq = '"';
     //private static String seps = ".:;#*`,!$%()=?^<>/&";
     
-    public String query_original;
     
     public final static String FACET_DEFAULT_PARAMETER = "host_s,url_file_ext_s,author_sxt,dates_in_content_dts,language_s,url_protocol_s,collection_sxt";
     
@@ -68,10 +65,10 @@ public class YaCyQuery {
         final ArrayList<String> fqs = new ArrayList<>();
 
         // add filter to prevent that results come from failed urls
-        fqs.add(WebMapping.httpstatus_i.getSolrFieldName() + ":" + HttpStatus.SC_OK);
+        fqs.add(WebMapping.httpstatus_i.getMapping().name() + ":" + HttpStatus.SC_OK);
         if (noimages) {
-            fqs.add("-" + WebMapping.content_type.getSolrFieldName() + ":(image/*)");
-            fqs.add("-" + WebMapping.url_file_ext_s.getSolrFieldName() + ":(jpg OR png OR gif)");
+            fqs.add("-" + WebMapping.content_type.getMapping().name() + ":(image/*)");
+            fqs.add("-" + WebMapping.url_file_ext_s.getMapping().name() + ":(jpg OR png OR gif)");
         }
         
         return fqs;
@@ -79,17 +76,24 @@ public class YaCyQuery {
 
     private final static Pattern term4ORPattern = Pattern.compile("(?:^| )(\\S*(?: OR \\S*)+)(?: |$)"); // Pattern.compile("(^\\s*(?: OR ^\\s*+)+)");
     private final static Pattern tokenizerPattern = Pattern.compile("([^\"]\\S*|\".+?\")\\s*"); // tokenizes Strings into terms respecting quoted parts
-    
+
     public QueryBuilder queryBuilder;
     public Date since;
     public Date until;
     public String[] collections;
+    public Boosts boosts;
+    public HashSet<String> yacyModifiers;
+    public HashSet<String> positiveBag, negativeBag;
 
     public YaCyQuery(String q, String[] collections, Classification.ContentDomain contentdom, int timezoneOffset) {
         // default values for since and util
         this.since = new Date(0);
         this.until = new Date(Long.MAX_VALUE);
         this.collections = collections;
+        this.boosts = Data.boostsFactory.getBoosts(); // creates a clone of a standard boost mapping
+        this.yacyModifiers = new HashSet<>();
+        this.positiveBag = new HashSet<>();
+        this.negativeBag = new HashSet<>();
         
         // parse the query string
         this.queryBuilder = preparse(q, timezoneOffset);
@@ -103,10 +107,10 @@ public class YaCyQuery {
                 int p = s.indexOf('^');
                 TermQueryBuilder tq;
                 if (p >= 0) {
-                    tq = QueryBuilders.termQuery(WebMapping.collection_sxt.getSolrFieldName(), s.substring(0, p));
+                    tq = QueryBuilders.termQuery(WebMapping.collection_sxt.getMapping().name(), s.substring(0, p));
                     tq.boost(Float.parseFloat(s.substring(p + 1)));
                 } else {
-                    tq = QueryBuilders.termQuery(WebMapping.collection_sxt.getSolrFieldName(), s);
+                    tq = QueryBuilders.termQuery(WebMapping.collection_sxt.getMapping().name(), s);
                 }
                 collectionQuery.should(tq);
             }
@@ -117,12 +121,12 @@ public class YaCyQuery {
         // add content domain
         if (contentdom == Classification.ContentDomain.IMAGE) {
             BoolQueryBuilder qb = QueryBuilders.boolQuery().must(this.queryBuilder);
-            qb.must(QueryBuilders.rangeQuery(WebMapping.imagescount_i.getSolrFieldName()).gt(new Integer(0)));
+            qb.must(QueryBuilders.rangeQuery(WebMapping.imagescount_i.getMapping().name()).gt(new Integer(0)));
             this.queryBuilder = qb;
         }
         if (contentdom == Classification.ContentDomain.VIDEO) {
             BoolQueryBuilder qb = QueryBuilders.boolQuery().must(this.queryBuilder);
-            qb.must(QueryBuilders.rangeQuery(WebMapping.videolinkscount_i.getSolrFieldName()).gt(new Integer(0)));
+            qb.must(QueryBuilders.rangeQuery(WebMapping.videolinkscount_i.getMapping().name()).gt(new Integer(0)));
             this.queryBuilder = qb;
         }
         
@@ -180,11 +184,12 @@ public class YaCyQuery {
     
     private final static String[][] modifierTypes = new String[][] {
         new String[] {"id", "_id"},
-        new String[] {"intitle", WebMapping.title.getSolrFieldName()},
-        new String[] {"inurlinurl", WebMapping.url_file_name_tokens_t.getSolrFieldName()},
-        new String[] {"filetype", WebMapping.url_file_ext_s.getSolrFieldName()},
-        new String[] {"site", WebMapping.host_s.getSolrFieldName()},
-        new String[] {"author", WebMapping.author_sxt.getSolrFieldName()}
+        new String[] {"intitle", WebMapping.title.getMapping().name()},
+        new String[] {"inurlinurl", WebMapping.url_file_name_tokens_t.getMapping().name()},
+        new String[] {"filetype", WebMapping.url_file_ext_s.getMapping().name()},
+        new String[] {"site", WebMapping.host_s.getMapping().name()},
+        new String[] {"author", WebMapping.author_sxt.getMapping().name()},
+        new String[] {"yacy", "_id"}
     };
     
     private QueryBuilder parse(String q, int timezoneOffset) {
@@ -245,22 +250,39 @@ public class YaCyQuery {
                 if (t.length() == 0) continue;
                 if ((t.charAt(0) == dq && t.charAt(t.length() - 1) == dq) || (t.charAt(0) == sq && t.charAt(t.length() - 1) == sq)) {
                     t = t.substring(1, t.length() - 1);
-                    if (negative) text_negative_filter.add(t); else text_positive_filter.add(t);
+                    if (negative) {
+                        text_negative_filter.add(t);
+                        this.negativeBag.add(t);
+                    } else {
+                        text_positive_filter.add(t);
+                        this.positiveBag.add(t);
+                    }
                 } else if (t.indexOf('-') > 0) {
                     // this must be handled like a quoted string without the minus
                     t = t.replace('-', space);
-                    if (negative) text_negative_filter.add(t); else text_positive_filter.add(t);
+                    if (negative) {
+                        text_negative_filter.add(t);
+                        this.negativeBag.add(t);
+                    } else {
+                        text_positive_filter.add(t);
+                        this.positiveBag.add(t);
+                    }
                 } else {
-                    if (negative) text_negative_match.add(t); else text_positive_match.add(t);
+                    if (negative) {
+                        text_negative_match.add(t);
+                        this.negativeBag.add(t);
+                    } else {
+                        text_positive_match.add(t);
+                        this.positiveBag.add(t);
+                    }
                 }
                 continue;
             }
         }
         
         // construct a ranking
-        Boosts boosts = new Boosts(); // creates a clone of a standard boost mapping
         if (modifier.containsKey("boost")) {
-            boosts.patchWithModifier(modifier.get("boost").iterator().next());
+            this.boosts.patchWithModifier(modifier.get("boost").iterator().next());
         }
         
         // compose query for text
@@ -270,24 +292,38 @@ public class YaCyQuery {
         if (!text_negative_match.isEmpty()) queries.add(QueryBuilders.boolQuery().mustNot(simpleQueryBuilder(String.join(" ", text_negative_match), ORconnective, boosts)));
         // exact matching
         for (String text: text_positive_filter) {
-            queries.add(exactMatchQueryBuilder(text, boosts));
+            queries.add(exactMatchQueryBuilder(text, this.boosts));
         }
         for (String text: text_negative_filter) {
-            queries.add(QueryBuilders.boolQuery().mustNot(exactMatchQueryBuilder(text, boosts)));
+            queries.add(QueryBuilders.boolQuery().mustNot(exactMatchQueryBuilder(text, this.boosts)));
         }
         
         // apply modifiers
-        for (String[] modifierType: modifierTypes) {
-        	String name = modifierType[1];
-            if (modifier.containsKey(modifierType[0])) {
-            	Collection<String> values = modifier.get(modifierType[0]);
-            	TermsQueryBuilder tqb = QueryBuilders.termsQuery(name, values);
-                queries.add(QueryBuilders.constantScoreQuery(tqb));
+        Collection<String> values;
+        modifier_handling: for (String[] modifierType: modifierTypes) {
+            String modifier_name = modifierType[0];
+            String index_name = modifierType[1];
+
+            if ((values = modifier.get(modifier_name)).size() > 0) {
+                if (modifier_name.equals("yacy")) {
+                    values.forEach(y -> this.yacyModifiers.add(y));
+                    continue modifier_handling;
+                }
+                if (modifier_name.equals("site") && values.size() == 1) {
+                    String host = values.iterator().next();
+                    if (host.startsWith("www.")) values.add(host.substring(4)); else values.add("www." + host);
+                }
+                queries.add(QueryBuilders.constantScoreQuery(QueryBuilders.termsQuery(index_name, values)));
+                continue modifier_handling;
             }
-            if (modifier.containsKey("-" + modifierType[0])) {
-            	Collection<String> values = modifier.get("-" + modifierType[0]);
-            	TermsQueryBuilder tqb = QueryBuilders.termsQuery(name, values);
-                queries.add(QueryBuilders.boolQuery().mustNot(QueryBuilders.constantScoreQuery(tqb)));
+           
+            if ((values = modifier.get("-" + modifier_name)).size() > 0) {
+                if (modifier_name.equals("site") && values.size() == 1) {
+                    String host = values.iterator().next();
+                    if (host.startsWith("www.")) values.add(host.substring(4)); else values.add("www." + host);
+                }
+                queries.add(QueryBuilders.boolQuery().mustNot(QueryBuilders.constantScoreQuery(QueryBuilders.termsQuery(index_name, values))));
+                continue modifier_handling;
             }
         }
         if (modifier.containsKey("collection") && (this.collections == null || this.collections.length == 0)) {
@@ -311,7 +347,7 @@ public class YaCyQuery {
         if (modifier.containsKey("since")) try {
             Calendar since = DateParser.parse(modifier.get("since").iterator().next(), timezoneOffset);
             this.since = since.getTime();
-            RangeQueryBuilder rangeQuery = QueryBuilders.rangeQuery(WebMapping.last_modified.getSolrFieldName()).from(DateParser.formatGSAFS(this.since));
+            RangeQueryBuilder rangeQuery = QueryBuilders.rangeQuery(WebMapping.last_modified.getMapping().name()).from(DateParser.formatGSAFS(this.since));
             if (modifier.containsKey("until")) {
                 Calendar until = DateParser.parse(modifier.get("until").iterator().next(), timezoneOffset);
                 if (until.get(Calendar.HOUR) == 0 && until.get(Calendar.MINUTE) == 0) {
@@ -333,7 +369,7 @@ public class YaCyQuery {
                 until.add(Calendar.DATE, 1);
             }
             this.until = until.getTime();
-            RangeQueryBuilder rangeQuery = QueryBuilders.rangeQuery(WebMapping.last_modified.getSolrFieldName()).to(DateParser.formatGSAFS(this.until));
+            RangeQueryBuilder rangeQuery = QueryBuilders.rangeQuery(WebMapping.last_modified.getMapping().name()).to(DateParser.formatGSAFS(this.until));
             queries.add(rangeQuery);
         } catch (ParseException e) {}
 
@@ -359,45 +395,15 @@ public class YaCyQuery {
                 .multiMatchQuery(q)
                 .operator(or ? Operator.OR : Operator.AND)
                 .zeroTermsQuery(ZeroTermsQuery.ALL);
-        boosts.forEach((mapping, boost) -> qb.field(mapping.getSolrFieldName(), boost));
+        boosts.forEach((mapping, boost) -> qb.field(mapping.getMapping().name(), boost));
         return qb;
     }
     
     public static QueryBuilder exactMatchQueryBuilder(String q, Boosts boosts) {
         BoolQueryBuilder qb = QueryBuilders.boolQuery();
-        boosts.forEach((mapping, boost) -> qb.should(QueryBuilders.termQuery(mapping.getSolrFieldName(), q)));
+        boosts.forEach((mapping, boost) -> qb.should(QueryBuilders.termQuery(mapping.getMapping().name(), q)));
         qb.minimumShouldMatch(1);
         return qb;
     }
     
-    public static String pickBestImage(Map<String, Object> hit, String dflt) {
-        Object images_height = hit.get(WebMapping.images_height_val.getSolrFieldName());
-        Object images_width = hit.get(WebMapping.images_width_val.getSolrFieldName());
-        Object images = hit.get(WebMapping.images_sxt.getSolrFieldName());
-        if (images instanceof List && images_height instanceof List && images_width instanceof List) {
-            @SuppressWarnings("unchecked")
-            List<String> links = (List<String>) images;
-            @SuppressWarnings("unchecked")
-            List<Integer> heights = (List<Integer>) images_height;
-            @SuppressWarnings("unchecked")
-            List<Integer> widths = (List<Integer>) images_width;
-            if (links.size() == heights.size() && heights.size() == widths.size()) {
-                int maxsize = 0;
-                int maxi = 0;
-                for (int i = 0; i < heights.size(); i++) {
-                    int pixel = heights.get(i) * widths.get(i);
-                    if (pixel > maxsize) {
-                        maxsize = pixel;
-                        maxi = i;
-                    }
-                }
-                String link = links.get(maxi);
-                return link;
-            } else {
-                String link = links.get(0);
-                return link;
-            }
-        }
-        return dflt;
-    }
 }

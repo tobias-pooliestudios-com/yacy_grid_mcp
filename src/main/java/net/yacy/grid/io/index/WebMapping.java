@@ -20,26 +20,13 @@
 
 package net.yacy.grid.io.index;
 
-import org.json.JSONObject;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.regex.Pattern;
 
 public enum WebMapping implements MappingDeclaration {
-    // dates_in_content_dts,language_s
-    /*
  
-
-    "facetname": "namespace",
-    "displayname": "Wiki Name Space",
-    "type": "String",
-    
-
-    "facetname": "topics",
-    "displayname": "Topics",
-    "type": "String",
-    
-    */
-    
-	//MappingType type, indexed, stored, multiValued, omitNorms, searchable, comment, mandatory) {
-    
     // mandatory
     url_s(MappingType.string, true, true, false, true, true, "url of document", true), // a 'sku' is a stock-keeping unit, a unique identifier and a default field in unmodified solr.
     //sku(MappingType.text_en_splitting_tight, true, true, false, true, true, "url of document"), // a 'sku' is a stock-keeping unit, a unique identifier and a default field in unmodified solr.
@@ -249,173 +236,39 @@ public enum WebMapping implements MappingDeclaration {
     public final static String VOCABULARY_LOGCOUNT_SUFFIX = "_log_i"; // log2(VOCABULARY_COUNT)] -- can be used for ranking boosts based on the number of occurrences
     public final static String VOCABULARY_LOGCOUNTS_SUFFIX = "_log_val"; // all integers from [0 to log2(VOCABULARY_COUNT)] -- can be used for ranking boosts based on the number of occurrences
     
-    private String solrFieldName = null; // solr field name in custom solr schema, defaults to solcell schema field name (= same as this.name() )
-    private final MappingType type;
-    private final boolean indexed, stored, searchable, multiValued, omitNorms, docValues;
-    private String comment;
-    
-    // for facets:
-    private String facetname, displayname, facettype, facetmodifier;
-    
-    /** When true, the field must be enabled for proper YaCy operation */
-    private boolean mandatory = false;
+    private Mapping mapping;
     
     private WebMapping(final MappingType type, final boolean indexed, final boolean stored, final boolean multiValued, final boolean omitNorms, final boolean searchable, final String comment) {
-        this(type, indexed, stored, multiValued, omitNorms, searchable, comment, false);
+        this.mapping = new Mapping(this.name(), type, indexed, stored, multiValued, omitNorms, searchable, comment, false);
     }
 
     private WebMapping(final MappingType type, final boolean indexed, final boolean stored, final boolean multiValued, final boolean omitNorms, final boolean searchable, final String comment, final boolean mandatory) {
-        this.type = type;
-        this.indexed = indexed;
-        this.stored = stored;
-        this.multiValued = multiValued;
-        this.omitNorms = omitNorms;
-        this.searchable = searchable;
-        this.comment = comment;
-        this.mandatory = mandatory;
-        this.docValues = (type == MappingType.string || type == MappingType.date || type.name().startsWith("num_"));
-        // verify our naming scheme
-        String name = this.name();
-        int p = name.indexOf('_');
-        if (p > 0) {
-            String ext = name.substring(p + 1);
-            assert !ext.equals("i") || (type == MappingType.num_integer && !multiValued) : name;
-            assert !ext.equals("l") || (type == MappingType.num_long && !multiValued) : name;
-            assert !ext.equals("b") || (type == MappingType.bool && !multiValued) : name;
-            assert !ext.equals("s") || (type == MappingType.string && !multiValued) : name;
-            assert !ext.equals("sxt") || (type == MappingType.string && multiValued) : name;
-            assert !ext.equals("dt") || (type == MappingType.date && !multiValued) : name;
-            assert !ext.equals("dts") || (type == MappingType.date && multiValued) : name;
-            assert !ext.equals("t") || (type == MappingType.text_general && !multiValued) : name;
-            assert !ext.equals("coordinate") || (type == MappingType.coordinate && !multiValued) : name;
-            assert !ext.equals("txt") || (type == MappingType.text_general && multiValued) : name;
-            assert !ext.equals("val") || (type == MappingType.num_integer && multiValued) : name;
-            assert !ext.equals("d") || (type == MappingType.num_double && !multiValued) : name;
-        }
-        assert type.appropriateName(this) : "bad configuration: " + this.name();
-        this.facetname = "";
-        this.displayname = "";
-        this.facettype = "";
-        this.facetmodifier = "";
+        this.mapping = new Mapping(this.name(), type, indexed, stored, multiValued, omitNorms, searchable, comment, mandatory);
     }
     
     private WebMapping(final MappingType type, final boolean indexed, final boolean stored, final boolean multiValued, final boolean omitNorms, final boolean searchable, final String comment, final boolean mandatory,
                        final String facetname, final String displayname, final String facettype, final String facetmodifier) {
-        this(type, indexed, stored,  multiValued, omitNorms, searchable, comment, mandatory);
-        this.facetname = facetname;
-        this.displayname = displayname;
-        this.facettype = facettype;
-        this.facetmodifier = facetmodifier;
+        this.mapping = new Mapping(this.name(), type, indexed, stored, multiValued, omitNorms, searchable, comment, mandatory, facetname, displayname, facettype, facetmodifier);
     }
     
-    /**
-     * Returns the YaCy default or (if available) custom field name for Solr
-     * @return SolrFieldname String
-     */
     @Override
-    public final String getSolrFieldName() {
-        return (this.solrFieldName == null ? this.name() : this.solrFieldName);
+    public final Mapping getMapping() {
+        return this.mapping;
     }
 
-    /**
-     * Set a custom Solr field name (and converts it to lower case)
-     * @param theValue = the field name
-     */
-    @Override
-    public final void setSolrFieldName(String theValue) {
-        // make sure no empty string is assigned
-        if ( (theValue != null) && (!theValue.isEmpty()) ) {
-            this.solrFieldName = theValue.toLowerCase();
-        } else {
-            this.solrFieldName = null;
+    public static final Pattern catchall_pattern = Pattern.compile(".*");
+    
+    public static Map<String, Pattern> collectionParser(String collectionString) {
+        if (collectionString == null || collectionString.length() == 0) return new HashMap<String, Pattern>();
+        String[] cs = collectionString.split(",");
+        final Map<String, Pattern> cm = new LinkedHashMap<String, Pattern>();
+        for (String c: cs) {
+            int p = c.indexOf(':');
+            if (p < 0) cm.put(c, catchall_pattern); else cm.put(c.substring(0, p), Pattern.compile(c.substring(p + 1)));
         }
-    }
-
-    @Override
-    public final MappingType getType() {
-        return this.type;
-    }
-
-    @Override
-    public final boolean isIndexed() {
-        return this.indexed;
-    }
-
-    @Override
-    public final boolean isStored() {
-        return this.stored;
-    }
-
-    @Override
-    public final boolean isMultiValued() {
-        return this.multiValued;
-    }
-
-    @Override
-    public final boolean isOmitNorms() {
-        return this.omitNorms;
-    }
-
-    @Override
-    public final boolean isSearchable() {
-        return this.searchable;
+        return cm;
     }
     
-    @Override
-    public boolean isDocValue() {
-        return this.docValues;
-    }
-
-    @Override
-    public final String getComment() {
-        return this.comment;
-    }
-    
-    @Override
-    public final boolean isMandatory() {
-        return this.mandatory;
-    }
-
-    @Override
-    public final String getFacetname() {
-        return this.facetname;
-    }
-
-    @Override
-    public final String getDisplayname() {
-        return this.displayname;
-    }
-
-    @Override
-    public final String getFacettype() {
-        return this.facettype;
-    }
-    
-    @Override
-    public final String getFacetmodifier() {
-        return this.facetmodifier;
-    }
-    
-    @Override
-    public final JSONObject toJSON() {
-    	JSONObject json = new JSONObject();
-    	json.put("type", getType().elasticName());
-    	if (getType() == MappingType.string) json.put("index", "not_analyzed");
-    	json.put("include_in_all", isIndexed() || isSearchable() ? "true":"false");
-    	return json;
-    }
-
-	public static JSONObject elasticsearchMapping(String indexName) {
-		JSONObject properties = new JSONObject(true);
-		for (WebMapping mapping: WebMapping.values()) {
-			properties.put(mapping.name(), mapping.toJSON());
-		}
-		JSONObject index = new JSONObject().put("properties", properties);
-		JSONObject mappings = new JSONObject().put(indexName, index);
-		JSONObject json = new JSONObject().put("mappings", mappings);
-		return json;
-	}
-
 	/**
 	 * Graph attributes are used by the parser to create a copy of a document which contains only links and references
 	 * to the indexed document identification. That graph document is used by the crawler to move on with crawling.
@@ -461,7 +314,7 @@ public enum WebMapping implements MappingDeclaration {
 	 * @param args
 	 */
 	public static void main(String[] args) {
-		System.out.println(elasticsearchMapping("web").toString(2));
+		System.out.println(Mapping.elasticsearchMapping("web").toString(2));
 	}
 }
 

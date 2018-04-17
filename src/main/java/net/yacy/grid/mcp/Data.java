@@ -20,28 +20,23 @@
 package net.yacy.grid.mcp;
 
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.file.FileSystems;
 import java.util.Map;
 
 import org.apache.log4j.ConsoleAppender;
 import org.apache.log4j.Logger;
 import org.apache.log4j.PatternLayout;
-import org.elasticsearch.client.transport.NoNodeAvailableException;
-import org.json.JSONObject;
-import org.json.JSONTokener;
 
 import net.yacy.grid.YaCyServices;
 import net.yacy.grid.io.assets.GridStorage;
 import net.yacy.grid.io.db.JSONDatabase;
 import net.yacy.grid.io.db.PeerDatabase;
-import net.yacy.grid.io.index.ElasticsearchClient;
+import net.yacy.grid.io.index.BoostsFactory;
+import net.yacy.grid.io.index.ElasticIndexFactory;
+import net.yacy.grid.io.index.GridIndex;
 import net.yacy.grid.io.messages.GridBroker;
 import net.yacy.grid.io.messages.PeerBroker;
+import net.yacy.grid.tools.MapUtil;
 
 public class Data {
     
@@ -49,16 +44,16 @@ public class Data {
     public static PeerDatabase peerDB;
     public static JSONDatabase peerJsonDB;
     public static GridBroker gridBroker;
-    public static PeerBroker peerBroker;
     public static GridStorage gridStorage;
+    public static GridIndex gridIndex;
     public static Logger logger;
     public static Map<String, String> config;
     public static LogAppender logAppender;
-    private static ElasticsearchClient index = null; // will be initialized on-the-fly
+    public static BoostsFactory boostsFactory;
     
     //public static Swagger swagger;
     
-    public static void init(File serviceData, Map<String, String> cc) {
+    public static void init(File serviceData, Map<String, String> cc, boolean localStorage) {
         PatternLayout layout = new PatternLayout("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %p %c %x - %m%n");
         logger = Logger.getRootLogger();
         logger.removeAllAppenders();
@@ -87,13 +82,19 @@ public class Data {
         // create broker
         File messagesPath = new File(gridServicePath, "messages");
         if (!messagesPath.exists()) messagesPath.mkdirs();
-        peerBroker = new PeerBroker(messagesPath);
-        gridBroker = new GridBroker(messagesPath, config.containsKey("grid.broker.lazy") && config.get("grid.broker.lazy").equals("true"));
+        boolean lazy = config.containsKey("grid.broker.lazy") && config.get("grid.broker.lazy").equals("true");
+        gridBroker = new GridBroker(lazy, localStorage ? messagesPath : null);
         
         // create storage
         File assetsPath = new File(gridServicePath, "assets");
         boolean deleteafterread = cc.containsKey("grid.assets.delete") && cc.get("grid.assets.delete").equals("true");
-        gridStorage = new GridStorage(deleteafterread, assetsPath);
+        gridStorage = new GridStorage(deleteafterread, localStorage ? assetsPath : null);
+        
+        // create index
+        String elasticsearchAddress = config.getOrDefault("grid.elasticsearch.address", "");
+        String elasticsearchClusterName = config.getOrDefault("grid.elasticsearch.clusterName", "");
+        gridIndex = new GridIndex();
+        gridIndex.connectElasticsearch(ElasticIndexFactory.PROTOCOL_PREFIX + elasticsearchAddress + "/" + elasticsearchClusterName);
         
         // connect outside services
         // first try to connect to the configured MCPs.
@@ -102,9 +103,12 @@ public class Data {
         String[] gridMcpAddress = gridMcpAddressl.split(",");
         boolean mcpConnected = false;
         for (String address: gridMcpAddress) {
+            String host = getHost(address);
+            int port = YaCyServices.mcp.getDefaultPort();
             if (    address.length() > 0 &&
-                    Data.gridBroker.connectMCP(getHost(address), YaCyServices.mcp.getDefaultPort()) &&
-                    Data.gridStorage.connectMCP(getHost(address), YaCyServices.mcp.getDefaultPort())
+                    Data.gridBroker.connectMCP(host, port) &&
+                    Data.gridStorage.connectMCP(host, port) &&
+                    Data.gridIndex.connectMCP(host, port)
                 ) {
                 Data.logger.info("Connected MCP at " + getHost(address));
                 mcpConnected = true;
@@ -136,39 +140,11 @@ public class Data {
             }
         }
         
+        // init boosts from configuration
+        Map<String, String> defaultBoosts = Service.readDoubleConfig("boost.properties");
+        boostsFactory = new BoostsFactory(defaultBoosts);
     }
     
-    public static ElasticsearchClient getIndex() {
-        if (index == null) {
-            // create index
-            String elasticsearchAddress = config.getOrDefault("grid.elasticsearch.address", "localhost:9300");
-            String elasticsearchClusterName = config.getOrDefault("grid.elasticsearch.clusterName", "");
-            index = new ElasticsearchClient(new String[]{elasticsearchAddress}, elasticsearchClusterName.length() == 0 ? null : elasticsearchClusterName);
-            Data.logger.info("Connected elasticsearch at " + getHost(elasticsearchAddress));
-            
-            Path mappingsPath = Paths.get("conf","mappings");
-            if (mappingsPath.toFile().exists()) {
-            	for (File f: mappingsPath.toFile().listFiles()) {
-	            	if (f.getName().endsWith(".json")) {
-		                String indexName = f.getName();
-		                indexName = indexName.substring(0, indexName.length() - 5); // cut off ".json"
-	            		try {
-			                index.createIndexIfNotExists(indexName, 1 /*shards*/, 1 /*replicas*/);
-			                JSONObject mo = new JSONObject(new JSONTokener(new InputStreamReader(new FileInputStream(f), StandardCharsets.UTF_8)));
-			                mo = mo.getJSONObject("mappings").getJSONObject("_default_");
-			                index.setMapping(indexName, mo.toString());
-			                Data.logger.info("initiated mapping for index " + indexName);
-			            } catch (IOException | NoNodeAvailableException e) {
-			                index = null; // index not available
-			                Data.logger.info("Failed creating mapping for index " + indexName, e);
-			            }
-	            	}
-            	}
-            }
-        }
-        return index;
-    }
-
     public static String getHost(String address) {
         String hp = t(address, '@', address);
         return h(hp, ':', hp);
@@ -202,10 +178,7 @@ public class Data {
     public static void close() {
         peerJsonDB.close();
         peerDB.close();
-        
-        peerBroker.close();
         gridBroker.close();
-        
         gridStorage.close();
     }
     

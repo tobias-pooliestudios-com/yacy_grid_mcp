@@ -26,9 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.servlet.http.HttpServletResponse;
 
-import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.search.fetch.subphase.highlight.HighlightBuilder;
-import org.elasticsearch.search.fetch.subphase.highlight.HighlightField;
 import org.json.XML;
 
 import net.yacy.grid.http.APIHandler;
@@ -37,6 +35,7 @@ import net.yacy.grid.http.Query;
 import net.yacy.grid.http.ServiceResponse;
 import net.yacy.grid.io.index.ElasticsearchClient;
 import net.yacy.grid.io.index.Sort;
+import net.yacy.grid.io.index.WebDocument;
 import net.yacy.grid.io.index.WebMapping;
 import net.yacy.grid.io.index.YaCyQuery;
 import net.yacy.grid.mcp.Data;
@@ -55,6 +54,7 @@ import net.yacy.grid.tools.Digest;
  * 
  * test: call
  * http://127.0.0.1:8100/yacy/grid/mcp/index/gsasearch.xml?q=*
+ * http://127.0.0.1:8100/yacy/grid/mcp/index/gsasearch.xml?q=*&contentdom=image
  * http://127.0.0.1:8100/yacy/grid/mcp/index/gsasearch.xml?q=*%20daterange:2017-01-01..2018-01-01
  * http://127.0.0.1:8100/yacy/grid/mcp/index/gsasearch.xml?q=site:heise.de
  * http://127.0.0.1:8100/yacy/grid/mcp/index/gsasearch.xml?q=*&as_sitesearch=heise.de
@@ -101,10 +101,11 @@ public class GSASearchService extends ObjectAPIHandler implements APIHandler {
         String queryXML = XML.escape(q);
         
         // prepare a query
-        QueryBuilder termQuery = new YaCyQuery(translatedQ, sites, contentdom, timezoneOffset).queryBuilder;
+        YaCyQuery yq = new YaCyQuery(translatedQ, sites, contentdom, timezoneOffset);
 
-        HighlightBuilder hb = new HighlightBuilder().field(WebMapping.text_t.getSolrFieldName()).preTags("").postTags("").fragmentSize(140);
-        ElasticsearchClient.Query query = Data.getIndex().query("web", termQuery, null, sort, hb, timezoneOffset, start, num, 0, explain);
+        ElasticsearchClient ec = Data.gridIndex.getElasticClient();
+        HighlightBuilder hb = new HighlightBuilder().field(WebMapping.text_t.getMapping().name()).preTags("").postTags("").fragmentSize(140);
+        ElasticsearchClient.Query query = ec.query("web", null, yq.queryBuilder, null, sort, hb, timezoneOffset, start, num, 0, explain);
         List<Map<String, Object>> result = query.results;
         List<String> explanations = query.explanations;
  
@@ -134,26 +135,20 @@ public class GSASearchService extends ObjectAPIHandler implements APIHandler {
         // List
         final AtomicInteger hit = new AtomicInteger(1);
         for (int hitc = 0; hitc < result.size(); hitc++) {
-            Map<String, Object> map = result.get(hitc);
-            Map<String, HighlightField> highlights = query.highlights.get(hitc);
-            List<?> title = (List<?>) map.get(WebMapping.title.getSolrFieldName());
-            String titleXML = title == null || title.isEmpty() ? "" : XML.escape(title.iterator().next().toString());
-            Object link = map.get(WebMapping.url_s.getSolrFieldName());
-            if (Classification.ContentDomain.IMAGE == contentdom) link = YaCyQuery.pickBestImage(map, (String) link);
+            WebDocument doc = new WebDocument(result.get(hitc));
+            String titleXML = XML.escape(doc.getTitle());
+            String link = doc.getLink();
+            if (Classification.ContentDomain.IMAGE == contentdom) link = doc.pickImage((String) link);
             String linkXML = XML.escape(link.toString());
-            String urlhash = Digest.encodeMD5Hex(link.toString());
-            
-            List<?> description = (List<?>) map.get(WebMapping.description_txt.getSolrFieldName());
-            String snippetDescription = description == null || description.isEmpty() ? "" : description.iterator().next().toString();
-            String snippetHighlight = highlights == null || highlights.isEmpty() ? "" : highlights.values().iterator().next().fragments()[0].toString();
-            String snippetXML = snippetDescription.length() > snippetHighlight.length() ? XML.escape(snippetDescription) : XML.escape(snippetHighlight);
-            String last_modified = (String) map.get(WebMapping.last_modified.getSolrFieldName());
-            Date last_modified_date = DateParser.iso8601MillisParser(last_modified);
-            Integer size = (Integer) map.get(WebMapping.size_i.getSolrFieldName());
+            String urlhash = Digest.encodeMD5Hex(link);
+            String snippet = doc.getSnippet(query.highlights.get(hitc), yq);
+            String snippetXML = XML.escape(snippet);
+            Date last_modified_date = doc.getDate();
+            int size = doc.getSize();
             int sizekb = size / 1024;
             int sizemb = sizekb / 1024;
             String size_string = sizemb > 0 ? (Integer.toString(sizemb) + " mbyte") : sizekb > 0 ? (Integer.toString(sizekb) + " kbyte") : (Integer.toString(size) + " byte");
-            //String host = (String) map.get(WebMapping.host_s.getSolrFieldName());
+            //String host = doc.getString(WebMapping.host_s, "");
 	        sb.append("<R N=\"").append(Integer.toString(hit.getAndIncrement())).append("\" MIME=\"text/html\">\n");
 	        sb.append("<T>").append(titleXML).append("</T>\n");
 	        sb.append("<FS NAME=\"date\" VALUE=\"").append(DateParser.formatGSAFS(last_modified_date)).append("\"/>\n");

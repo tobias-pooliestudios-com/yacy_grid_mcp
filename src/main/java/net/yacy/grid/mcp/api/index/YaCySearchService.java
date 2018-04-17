@@ -26,7 +26,7 @@ import java.util.Map;
 
 import javax.servlet.http.HttpServletResponse;
 
-import org.elasticsearch.index.query.QueryBuilder;
+import org.elasticsearch.search.fetch.subphase.highlight.HighlightBuilder;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -36,6 +36,7 @@ import net.yacy.grid.http.Query;
 import net.yacy.grid.http.ServiceResponse;
 import net.yacy.grid.io.index.ElasticsearchClient;
 import net.yacy.grid.io.index.Sort;
+import net.yacy.grid.io.index.WebDocument;
 import net.yacy.grid.io.index.WebMapping;
 import net.yacy.grid.io.index.YaCyQuery;
 import net.yacy.grid.mcp.Data;
@@ -65,7 +66,7 @@ public class YaCySearchService extends ObjectAPIHandler implements APIHandler {
         boolean jsonp = callback != null && callback.length() > 0;
         boolean minified = call.get("minified", false);
         boolean explain = call.get("explain", false);
-        String query = call.get("query", "");
+        String q = call.get("query", "");
         Classification.ContentDomain contentdom =  Classification.ContentDomain.contentdomParser(call.get("contentdom", "all"));
         String collection = call.get("collection", ""); // important: call arguments may overrule parsed collection values if not empty. This can be used for authentified indexes!
         collection = collection.replace(',', '|'); // to be compatible with the site-operator of GSA, we use a vertical pipe symbol here to divide collections.
@@ -83,10 +84,12 @@ public class YaCySearchService extends ObjectAPIHandler implements APIHandler {
         for (String s: facetFields.split(",")) facetFieldMapping.add(WebMapping.valueOf(s));
         Sort sort = new Sort(call.get("sort", ""));
         
-        QueryBuilder qb = new YaCyQuery(query, collections, contentdom, timezoneOffset).queryBuilder;
-        ElasticsearchClient.Query eq = Data.getIndex().query(
-                "web", qb, null, sort, null, timezoneOffset, startRecord, maximumRecords,
-                facetLimit, explain, facetFieldMapping.toArray(new WebMapping[facetFieldMapping.size()]));
+        YaCyQuery yq = new YaCyQuery(q, collections, contentdom, timezoneOffset);
+        ElasticsearchClient ec = Data.gridIndex.getElasticClient();
+        HighlightBuilder hb = new HighlightBuilder().field(WebMapping.text_t.getMapping().name()).preTags("").postTags("").fragmentSize(140);
+        ElasticsearchClient.Query query = ec.query(
+                "web", null, yq.queryBuilder, null, sort, hb, timezoneOffset, startRecord, maximumRecords, facetLimit, explain,
+                facetFieldMapping.toArray(new WebMapping[facetFieldMapping.size()]));
 
         JSONObject json = new JSONObject(true);
         JSONArray channels = new JSONArray();
@@ -94,42 +97,39 @@ public class YaCySearchService extends ObjectAPIHandler implements APIHandler {
         JSONObject channel = new JSONObject(true);
         channels.put(channel);
         JSONArray items = new JSONArray();
-        channel.put("title", "Search for " + query);
-        channel.put("description", "Search for " + query);
+        channel.put("title", "Search for " + q);
+        channel.put("description", "Search for " + q);
         channel.put("startIndex", "" + startRecord);
         channel.put("itemsPerPage", "" + items.length());
-        channel.put("searchTerms", query);
-        channel.put("totalResults", Integer.toString(eq.hitCount));
+        channel.put("searchTerms", q);
+        channel.put("totalResults", Integer.toString(query.hitCount));
         channel.put("items", items);
         
-        List<Map<String, Object>> result = eq.results;
-        List<String> explanations = eq.explanations;
+        List<Map<String, Object>> result = query.results;
+        List<String> explanations = query.explanations;
         for (int hitc = 0; hitc < result.size(); hitc++) {
-            Map<String, Object> map = result.get(hitc);
+            WebDocument doc = new WebDocument(result.get(hitc));
             JSONObject hit = new JSONObject(true);
-            List<?> title = (List<?>) map.get(WebMapping.title.getSolrFieldName());
-            String titleString = title == null || title.isEmpty() ? "" : title.iterator().next().toString();
-            Object link = map.get(WebMapping.url_s.getSolrFieldName());
+            String titleString = doc.getTitle();
+            String link = doc.getLink();
             if (Classification.ContentDomain.IMAGE == contentdom) {
                 hit.put("url", link); // the url before we extract the link
-                link = YaCyQuery.pickBestImage(map, (String) link);
+                link = doc.pickImage((String) link);
                 hit.put("icon", link);
                 hit.put("image", link);
             }
-            List<?> description = (List<?>) map.get(WebMapping.description_txt.getSolrFieldName());
-            String descriptionString = description == null || description.isEmpty() ? "" : description.iterator().next().toString();
-            String last_modified = (String) map.get(WebMapping.last_modified.getSolrFieldName());
-            Date last_modified_date = DateParser.iso8601MillisParser(last_modified);
-            Integer size = (Integer) map.get(WebMapping.size_i.getSolrFieldName());
+            String snippet = doc.getSnippet(query.highlights.get(hitc), yq);
+            Date last_modified_date = doc.getDate();
+            int size = doc.getSize();
             int sizekb = size / 1024;
             int sizemb = sizekb / 1024;
             String size_string = sizemb > 0 ? (Integer.toString(sizemb) + " mbyte") : sizekb > 0 ? (Integer.toString(sizekb) + " kbyte") : (Integer.toString(size) + " byte");
-            String host = (String) map.get(WebMapping.host_s.getSolrFieldName());
+            String host = doc.getHost();
 	        hit.put("title", titleString);
             hit.put("link", link.toString());
-            hit.put("description", descriptionString);
+            hit.put("description", snippet);
             hit.put("pubDate", DateParser.formatRFC1123(last_modified_date));
-            hit.put("size", size.toString());
+            hit.put("size", Integer.toString(size));
             hit.put("sizename", size_string);
             hit.put("host", host);
             if (explain) {
@@ -140,14 +140,14 @@ public class YaCySearchService extends ObjectAPIHandler implements APIHandler {
         JSONArray navigation = new JSONArray();
         channel.put("navigation", navigation);
         
-        Map<String, List<Map.Entry<String, Long>>> aggregations = eq.aggregations;
+        Map<String, List<Map.Entry<String, Long>>> aggregations = query.aggregations;
         for (Map.Entry<String, List<Map.Entry<String, Long>>> fe: aggregations.entrySet()) {
             String facetname = fe.getKey();
             WebMapping mapping = WebMapping.valueOf(facetname);
             JSONObject facetobject = new JSONObject(true);
-            facetobject.put("facetname", mapping.getFacetname());
-            facetobject.put("displayname", mapping.getDisplayname());
-            facetobject.put("type", mapping.getFacettype());
+            facetobject.put("facetname", mapping.getMapping().getFacetname());
+            facetobject.put("displayname", mapping.getMapping().getDisplayname());
+            facetobject.put("type", mapping.getMapping().getFacettype());
             facetobject.put("min", "0");
             facetobject.put("max", "0");
             facetobject.put("mean", "0");
@@ -158,7 +158,7 @@ public class YaCySearchService extends ObjectAPIHandler implements APIHandler {
                 JSONObject elementEntry = new JSONObject(true);
                 elementEntry.put("name", element.getKey());
                 elementEntry.put("count", element.getValue().toString());
-                elementEntry.put("modifier", mapping.getFacetmodifier() + ":" + element.getKey());
+                elementEntry.put("modifier", mapping.getMapping().getFacetmodifier() + ":" + element.getKey());
                 elements.put(elementEntry);
             }
             navigation.put(facetobject);

@@ -60,6 +60,7 @@ import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.action.search.SearchRequestBuilder;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.search.SearchType;
+import org.elasticsearch.action.update.UpdateResponse;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.client.transport.NoNodeAvailableException;
 import org.elasticsearch.client.transport.TransportClient;
@@ -88,6 +89,12 @@ import org.joda.time.format.ISODateTimeFormat;
 
 import net.yacy.grid.mcp.Data;
 
+/**
+ * To get data out of the elasticsearch index which is written with this client, try:
+ * http://localhost:9200/web/_search?q=*:*
+ * http://localhost:9200/crawler/_search?q=*:*
+ *
+ */
 public class ElasticsearchClient {
 
     private static long throttling_time_threshold = 2000L; // update time high limit
@@ -293,8 +300,12 @@ public class ElasticsearchClient {
      * @return the count of all documents in the index which matches with the query
      */
     public long count(final QueryBuilder q, final String indexName) {
-        SearchResponse response =
-            elasticsearchClient.prepareSearch(indexName).setQuery(q).setSize(0).execute().actionGet();
+        SearchResponse response = elasticsearchClient.prepareSearch(indexName).setQuery(q).setSize(0).execute().actionGet();
+        return response.getHits().getTotalHits();
+    }
+    
+    public long count(final QueryBuilder q, final String indexName, final String typeName) {
+        SearchResponse response = elasticsearchClient.prepareSearch(indexName).setTypes(typeName).setQuery(q).setSize(0).execute().actionGet();
         return response.getHits().getTotalHits();
     }
 
@@ -436,10 +447,16 @@ public class ElasticsearchClient {
      * @param q
      * @return delete document count
      */
-    public int deleteByQuery(String indexName, final QueryBuilder q) {
+    public int deleteByQuery(String indexName, String typeName, final QueryBuilder q) {
         Map<String, String> ids = new TreeMap<>();
-        SearchResponse response = elasticsearchClient.prepareSearch(indexName).setSearchType(SearchType.QUERY_THEN_FETCH)
-            .setScroll(new TimeValue(60000)).setQuery(q).setSize(100).execute().actionGet();
+        SearchRequestBuilder request = elasticsearchClient.prepareSearch(indexName);
+        if (typeName != null) request.setTypes(typeName);
+        request
+            .setSearchType(SearchType.QUERY_THEN_FETCH)
+            .setScroll(new TimeValue(60000))
+            .setQuery(q)
+            .setSize(100);
+        SearchResponse response = request.execute().actionGet();
         while (true) {
             // accumulate the ids here, don't delete them right now to prevent an interference of the delete with the
             // scroll
@@ -479,8 +496,8 @@ public class ElasticsearchClient {
      *            the unique identifier of a document
      * @return the document as json, matched on a Map<String, Object> object instance
      */
-    public Map<String, Object> readMap(String indexName, final String id) {
-        GetResponse response = elasticsearchClient.prepareGet(indexName, null, id).execute().actionGet();
+    public Map<String, Object> readMap(final String indexName, final String typeName, final String id) {
+        GetResponse response = elasticsearchClient.prepareGet(indexName, typeName, id).execute().actionGet();
         Map<String, Object> map = getMap(response);
         return map;
     }
@@ -488,7 +505,8 @@ public class ElasticsearchClient {
     protected static Map<String, Object> getMap(GetResponse response) {
         Map<String, Object> map = null;
         if (response.isExists() && (map = response.getSourceAsMap()) != null) {
-            map.put("$type", response.getType());
+            if (!map.containsKey("id")) map.put("id", response.getId());
+            if (!map.containsKey("type")) map.put("type", response.getType());
         }
         return map;
     }
@@ -522,23 +540,29 @@ public class ElasticsearchClient {
      * This id should be unique for the json. The best way to calculate this id is, to use an existing
      * field from the jsonMap which contains a unique identifier for the jsonMap.
      * 
-     * @param indexName
-     *            the name of the index
-     * @param jsonMap
-     *            the json document to be indexed in elasticsearch
-     * @param typeName
-     *            the type of the index
-     * @param id
-     *            the unique identifier of a document
+     * @param indexName the name of the index
+     * @param typeName the type of the index
+     * @param id the unique identifier of a document
+     * @param jsonMap the json document to be indexed in elasticsearch
      * @return true if the document with given id did not exist before, false if it existed and was overwritten
      */
-    public boolean writeMap(String indexName, final Map<String, Object> jsonMap, String typeName, String id) {
+    public boolean writeMap(String indexName, String typeName, String id, final Map<String, Object> jsonMap) {
         long start = System.currentTimeMillis();
         // get the version number out of the json, if any is given
         Long version = (Long) jsonMap.remove("_version");
         // put this to the index
-        IndexResponse r = null;
+        UpdateResponse r = null;
+        //IndexResponse r = null;
         try {
+            r = elasticsearchClient
+                .prepareUpdate(indexName, typeName, id)
+                .setDoc(jsonMap)
+                .setUpsert(jsonMap)
+                //.setVersion(version == null ? 1 : version.longValue())
+                //.setVersionType(VersionType.EXTERNAL_GTE)
+                .execute()
+                .actionGet();
+            /*
             r = elasticsearchClient
                 .prepareIndex(indexName, typeName, id)
                 .setCreate(false) // enforces OpType.INDEX
@@ -547,6 +571,7 @@ public class ElasticsearchClient {
                 .setVersionType(VersionType.EXTERNAL_GTE)
                 .execute()
                 .actionGet();
+             */
         } catch (ClusterBlockException e) {
             /*
             elasticsearchClient.admin().indices().prepareUpdateSettings(indexName)   
@@ -661,18 +686,23 @@ public class ElasticsearchClient {
         }
     }
 
-    public Map<String, Object> query(final String indexName, final String field_name, String field_value) {
+    public Map<String, Object> query(final String indexName, final String typeName, final String field_name, String field_value) {
         if (field_value == null || field_value.length() == 0) return null;
         // prepare request
         BoolQueryBuilder query = QueryBuilders.boolQuery();
         query.filter(QueryBuilders.constantScoreQuery(QueryBuilders.termQuery(field_name, field_value)));
+        return query(indexName, typeName, query);
+    }
 
-        SearchRequestBuilder request = elasticsearchClient.prepareSearch(indexName)
-                .setSearchType(SearchType.QUERY_THEN_FETCH)
-                .setQuery(query)
-                .setFrom(0)
-                .setSize(1).setTerminateAfter(1);
-
+    public Map<String, Object> query(final String indexName, final String typeName, final QueryBuilder query) {
+        SearchRequestBuilder request = elasticsearchClient.prepareSearch(indexName);
+        if (typeName != null) request.setTypes(typeName);
+        request
+            .setSearchType(SearchType.QUERY_THEN_FETCH)
+            .setQuery(query)
+            .setFrom(0)
+            .setSize(1).setTerminateAfter(1);
+        
         // get response
         SearchResponse response = request.execute().actionGet();
 
@@ -682,11 +712,13 @@ public class ElasticsearchClient {
         if (hits.length == 0) return null;
         assert hits.length == 1;
         Map<String, Object> map = hits[0].getSourceAsMap();
+        if (!map.containsKey("id")) map.put("id", hits[0].getId());
+        if (!map.containsKey("type")) map.put("type", hits[0].getType());
         return map;
     }
     
-    public Query query(final String indexName, final QueryBuilder queryBuilder, final QueryBuilder postFilter, final Sort sort, final HighlightBuilder hb, int timezoneOffset, int from, int resultCount, int aggregationLimit, boolean explain, WebMapping... aggregationFields) {
-        return new Query(indexName,  queryBuilder, postFilter, sort, hb, timezoneOffset, from, resultCount, aggregationLimit, explain, aggregationFields);
+    public Query query(final String indexName, String typeName, final QueryBuilder queryBuilder, final QueryBuilder postFilter, final Sort sort, final HighlightBuilder hb, int timezoneOffset, int from, int resultCount, int aggregationLimit, boolean explain, WebMapping... aggregationFields) {
+        return new Query(indexName, typeName,  queryBuilder, postFilter, sort, hb, timezoneOffset, from, resultCount, aggregationLimit, explain, aggregationFields);
     }
     
     public class Query {
@@ -707,12 +739,15 @@ public class ElasticsearchClient {
          * @param aggregationLimit - the maximum count of facet entities, not search results
          * @param aggregationFields - names of the aggregation fields. If no aggregation is wanted, pass no (zero) field(s)
          */
-        public Query(final String indexName, final QueryBuilder queryBuilder, final QueryBuilder postFilter, final Sort sort, final HighlightBuilder hb, int timezoneOffset, int from, int resultCount, int aggregationLimit, boolean explain, WebMapping... aggregationFields) {
+        public Query(final String indexName, String typeName, final QueryBuilder queryBuilder, final QueryBuilder postFilter, final Sort sort, final HighlightBuilder hb, int timezoneOffset, int from, int resultCount, int aggregationLimit, boolean explain, WebMapping... aggregationFields) {
             // prepare request
-            SearchRequestBuilder request = elasticsearchClient.prepareSearch(indexName)
+            SearchRequestBuilder request = elasticsearchClient.prepareSearch(indexName);
+            if (typeName != null) request.setTypes(typeName);
+            request
                     .setExplain(explain)
                     .setSearchType(SearchType.QUERY_THEN_FETCH)
                     .setQuery(queryBuilder)
+                    .setSearchType(SearchType.DFS_QUERY_THEN_FETCH) // DFS_QUERY_THEN_FETCH is slower but provides stability of search results
                     .setFrom(from)
                     .setSize(resultCount);
             if (hb != null) request.highlighter(hb);
@@ -720,7 +755,7 @@ public class ElasticsearchClient {
             if (postFilter != null) request.setPostFilter(postFilter);
             request.clearRescorers();
             for (WebMapping field: aggregationFields) {
-                request.addAggregation(AggregationBuilders.terms(field.getSolrFieldName()).field(field.getSolrFieldName()).minDocCount(1).size(aggregationLimit));
+                request.addAggregation(AggregationBuilders.terms(field.getMapping().name()).field(field.getMapping().name()).minDocCount(1).size(aggregationLimit));
             }
             // apply sort
             request = sort.sort(request);
@@ -737,6 +772,8 @@ public class ElasticsearchClient {
             this.highlights = new ArrayList<Map<String, HighlightField>>(hitCount);
             for (SearchHit hit: hits) {
                 Map<String, Object> map = hit.getSourceAsMap();
+                if (!map.containsKey("id")) map.put("id", hit.getId());
+                if (!map.containsKey("type")) map.put("type", hit.getType());
                 this.results.add(map);
                 this.highlights.add(hit.getHighlightFields());
                 if (explain) {
@@ -751,7 +788,7 @@ public class ElasticsearchClient {
             // collect results: fields
             this.aggregations = new HashMap<>();
             for (WebMapping field: aggregationFields) {
-                Terms fieldCounts = response.getAggregations().get(field.getSolrFieldName());
+                Terms fieldCounts = response.getAggregations().get(field.getMapping().name());
                 List<? extends Bucket> buckets = fieldCounts.getBuckets();
                 // aggregate double-tokens (matching lowercase)
                 Map<String, Long> checkMap = new HashMap<>();
@@ -772,7 +809,7 @@ public class ElasticsearchClient {
                         list.add(new AbstractMap.SimpleEntry<String, Long>(key, v));
                     }
                 }
-                aggregations.put(field.getSolrFieldName(), list);
+                aggregations.put(field.getMapping().name(), list);
                 //if (field.equals("place_country")) {
                     // special handling of country aggregation: add the country center as well
                 //}
