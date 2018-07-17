@@ -22,7 +22,6 @@ package net.yacy.grid.mcp;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.FileSystems;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -131,18 +130,48 @@ public enum Service {
             Data.logger.info("Service started at port " + port);
 
             // prepare shutdown signal
-            File pid = new File(data_dir, type.name() + "-" + port + ".pid");
-            if (pid.exists()) pid.delete(); // clean up rubbish
-            pid.createNewFile();
-            pid.deleteOnExit();
+            boolean pidkillfileCreated = false;
+            // we use two files: one kill file which can be used to stop the process and one pid file which exists until the process runs
+            // in case that the deletion of the kill file does not cause a termination, still a "fuser -k" on the pid file can be used to
+            // terminate the process.
+            File pidfile = new File(data_dir, type.name() + "-" + port + ".pid");
+            File killfile = new File(data_dir, type.name() + "-" + port + ".kill");
+            if (pidfile.exists()) pidfile.delete();
+            if (killfile.exists()) killfile.delete();
+            if (!pidfile.exists()) try {
+                pidfile.createNewFile();
+                if (pidfile.exists()) {pidfile.deleteOnExit(); pidkillfileCreated = true;}
+            } catch (IOException e) {
+                Data.logger.info("pid file " + pidfile.getAbsolutePath() + " creation failed: " + e.getMessage());
+            }
+            if (!killfile.exists()) try {
+                killfile.createNewFile();
+                if (killfile.exists()) killfile.deleteOnExit(); else pidkillfileCreated = false;
+            } catch (IOException e) {
+                Data.logger.info("kill file " + killfile.getAbsolutePath() + " creation failed: " + e.getMessage());
+                pidkillfileCreated = false;
+            }
             
             // wait for shutdown signal (kill on process)
-            APIServer.join();
+            if (pidkillfileCreated) {
+                // we can control this by deletion of the kill file
+                Data.logger.info("to stop this process, delete kill file " + killfile.getAbsolutePath());
+                while (APIServer.isAlive() && killfile.exists()) {
+                    try {Thread.sleep(1000);} catch (InterruptedException e) {}
+                }
+                APIServer.stop();
+            } else {
+                // something with the pid file creation did not work; fail-over to normal operation waiting for a kill command
+                APIServer.join();
+            }
+            Data.logger.info("server nominal termination requested");
         } catch (IOException e) {
             Data.logger.error("Main fail", e);
         }
-        
+
+        Data.logger.info("closing data.");
         Data.close();
+        Data.logger.info("server terminated.");
     }
     
 }

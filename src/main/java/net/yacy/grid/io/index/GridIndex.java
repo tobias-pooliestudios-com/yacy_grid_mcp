@@ -320,6 +320,7 @@ public class GridIndex implements Index {
 
     @Override
     public void close() {
+        if (this.elasticIndexFactory != null) this.elasticIndexFactory.close();
     }
 
 }
