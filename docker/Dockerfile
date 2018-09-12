@@ -1,48 +1,22 @@
-FROM ubuntu:xenial
+FROM gradle:4.10-jdk8-alpine as builder
 MAINTAINER publicplan GmbH
+LABEL MAINTAINER="publicplan GmbH"
 
-# update
-RUN apt-get update
-RUN apt-get upgrade -y
-RUN apt-get update --fix-missing
+COPY --chown=gradle:gradle ./ /app/yacy_grid_mcp
+WORKDIR /app/yacy_grid_mcp
 
-# install debug tools
-RUN apt-get install -y vim
-RUN apt-get install -y curl
-RUN apt-get install -y net-tools dnsutils inetutils-tools inetutils-ping
+RUN gradle shadowJar && \
+    mkdir data/mcp-8100/conf/ -p && \
+    cp docker/config-mcp.properties data/mcp-8100/conf/config.properties && \
+    cp docker/log4j.properties data/mcp-8100/conf/log4j.properties
 
-# add packages
-RUN apt-get install -y git openjdk-8-jdk
+FROM openjdk:8-alpine as runner
 
-# install gradle required for build
-RUN apt-get update && apt-get install -y software-properties-common
-RUN add-apt-repository ppa:cwchien/gradle
-RUN apt-get update
-RUN apt-get install -y wget
-RUN wget https://services.gradle.org/distributions/gradle-3.4.1-bin.zip
-RUN mkdir /opt/gradle
-RUN apt-get install -y unzip
-RUN unzip -d /opt/gradle gradle-3.4.1-bin.zip
-RUN PATH=$PATH:/opt/gradle/gradle-3.4.1/bin
-ENV GRADLE_HOME=/opt/gradle/gradle-3.4.1
-ENV PATH=$PATH:$GRADLE_HOME/bin
-RUN gradle -v
+WORKDIR /app
 
-# change workdir
-ADD ./ /yacy_grid_mcp
-WORKDIR /yacy_grid_mcp
+COPY --from=builder /app/yacy_grid_mcp/build/libs/*.jar /app/yacy-grid-mcp.jar
+COPY --from=builder /app/yacy_grid_mcp/data /app/data
 
-# create log dir
-RUN mkdir -p log
-
-# compile
-RUN gradle build
-RUN mkdir data/mcp-8100/conf/ -p
-RUN cp docker/config-mcp.properties data/mcp-8100/conf/config.properties
-RUN chmod +x ./docker/start.sh
-
-# expose web interface port
 EXPOSE 8100
-
-# define default command.
-ENTRYPOINT ["/bin/bash", "./docker/start.sh"]
+ENTRYPOINT ["java"]
+CMD ["-jar", "yacy-grid-mcp.jar"]

@@ -56,3 +56,6 @@ bin/log4j.properties
 bin/net/
 bin/org/
 
+config-mcp.properties
+log4j.properties
+docker/config-ftp.properties
