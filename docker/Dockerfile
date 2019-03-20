@@ -7,8 +7,9 @@ WORKDIR /app/yacy_grid_mcp
 
 RUN gradle shadowJar && \
     mkdir data/mcp-8100/conf/ -p && \
+    cp -r conf/* data/mcp-8100/conf/ && \
     cp docker/config-mcp.properties data/mcp-8100/conf/config.properties && \
-    cp docker/log4j.properties data/mcp-8100/conf/log4j.properties
+    cp docker/log4j.properties data/mcp-8100/conf/log4j2.properties
 
 FROM openjdk:8-alpine as runner
 
