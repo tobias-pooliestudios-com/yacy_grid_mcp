@@ -17,6 +17,7 @@ WORKDIR /app
 
 COPY --from=builder /app/yacy_grid_mcp/build/libs/*.jar /app/yacy-grid-mcp.jar
 COPY --from=builder /app/yacy_grid_mcp/data /app/data
+COPY --from=builder /app/yacy_grid_mcp/conf /app/conf
 
 EXPOSE 8100
 ENTRYPOINT ["java"]
