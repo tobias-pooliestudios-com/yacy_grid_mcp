@@ -128,10 +128,7 @@ public class JsonLDNode {
     }
 
     /**
-     * Add predicate value.
-     *
-     * Sets a predicate as it is, if it does not already exists. Otherwise the predicate value is transformed into an
-     * JSONArray holding all predicate values.
+     * Set new or add additional predicate with given key/name. Existing values will be converted to arrays of values.
      *
      * @param key
      * @param value
@@ -139,7 +136,6 @@ public class JsonLDNode {
      */
     public JsonLDNode addPredicate(String key, Object value) {
         if (!hasPredicate(key)) {
-            // Case 1
             return setPredicate(key, value);
         }
 
@@ -148,18 +144,18 @@ public class JsonLDNode {
             return setPredicate(key, value);
         } else if (predicateValue instanceof JSONObject && value instanceof JSONObject) {
             JSONObject existingValue = (JSONObject) predicateValue;
-            for (String subkey: ((JSONObject) value).keySet()) {
-                if (existingValue.has(subkey) && existingValue.get(subkey) instanceof JSONArray) {
-                    JSONArray valueArray = (JSONArray) existingValue.get(subkey);
-                    valueArray.put(((JSONObject) value).get(subkey));
-                    ((JSONObject) predicateValue).put(subkey, valueArray);
-                } else if (existingValue.has(subkey)) {
+            for (String subKey: ((JSONObject) value).keySet()) {
+                if (existingValue.has(subKey) && existingValue.get(subKey) instanceof JSONArray) {
+                    JSONArray valueArray = (JSONArray) existingValue.get(subKey);
+                    valueArray.put(((JSONObject) value).get(subKey));
+                    ((JSONObject) predicateValue).put(subKey, valueArray);
+                } else if (existingValue.has(subKey)) {
                     JSONArray valueArray = new JSONArray();
-                    valueArray.put(((JSONObject) value).get(subkey));
-                    valueArray.put(((JSONObject) predicateValue).get(subkey));
-                    ((JSONObject) predicateValue).put(subkey, valueArray);
+                    valueArray.put(((JSONObject) value).get(subKey));
+                    valueArray.put(((JSONObject) predicateValue).get(subKey));
+                    ((JSONObject) predicateValue).put(subKey, valueArray);
                 } else {
-                    ((JSONObject) predicateValue).put(subkey, ((JSONObject) value).get(subkey));
+                    ((JSONObject) predicateValue).put(subKey, ((JSONObject) value).get(subKey));
                 }
             }
 
