@@ -1,4 +1,4 @@
-FROM gradle:4.10-jdk8-alpine as builder
+FROM gradle:5.1.1-jdk8-alpine as builder
 MAINTAINER publicplan GmbH
 LABEL MAINTAINER="publicplan GmbH"
 
