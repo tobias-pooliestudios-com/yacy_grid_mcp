@@ -22,9 +22,9 @@ package net.yacy.grid.mcp;
 import java.io.File;
 import java.util.Map;
 
-import org.apache.log4j.ConsoleAppender;
 import org.apache.log4j.Logger;
 import org.apache.log4j.PatternLayout;
+import org.apache.log4j.ConsoleAppender;
 
 import net.yacy.grid.YaCyServices;
 import net.yacy.grid.io.assets.GridStorage;
@@ -58,7 +58,8 @@ public class Data {
         logAppender = new LogAppender(layout, 100000);
         logger.addAppender(logAppender);
         logger.addAppender(new ConsoleAppender(layout));
-        
+
+
         config = cc;
         /*
         try {

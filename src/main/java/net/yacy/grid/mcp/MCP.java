@@ -21,13 +21,11 @@ package net.yacy.grid.mcp;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Date;
-import java.util.List;
+import java.util.*;
 
 import javax.servlet.Servlet;
 
+import org.apache.log4j.Level;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -147,13 +145,13 @@ public class MCP {
                             continue; // this is an elasticsearch index directive, we just skip that
 
                         // write search index
-                        String date = null;
-                        if (date == null && json.has(WebMapping.last_modified.getMapping().name()))
-                            date = WebMapping.last_modified.getMapping().name();
-                        if (date == null && json.has(WebMapping.load_date_dt.getMapping().name()))
-                            date = WebMapping.load_date_dt.getMapping().name();
-                        if (date == null && json.has(WebMapping.fresh_date_dt.getMapping().name()))
-                            date = WebMapping.fresh_date_dt.getMapping().name();
+//                        String date = null;
+//                        if (date == null && json.has(WebMapping.last_modified.getMapping().name()))
+//                            date = WebMapping.last_modified.getMapping().name();
+//                        if (date == null && json.has(WebMapping.load_date_dt.getMapping().name()))
+//                            date = WebMapping.load_date_dt.getMapping().name();
+//                        if (date == null && json.has(WebMapping.fresh_date_dt.getMapping().name()))
+//                            date = WebMapping.fresh_date_dt.getMapping().name();
                         String url = json.getString(WebMapping.url_s.getMapping().name());
                         String urlid = MultiProtocolURL.getDigest(url);
                         boolean created = Data.gridIndex.getElasticClient().writeMap("web", "web", urlid, json.toMap());

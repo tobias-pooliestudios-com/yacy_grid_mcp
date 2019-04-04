@@ -149,7 +149,7 @@ public class GridBroker extends PeerBroker implements Broker<byte[]> {
         	    // try to connect again..
         	    connectMCP(this.mcp_host, this.mcp_port);
         	    if (this.mcpQueueFactory == null) {
-        	        Data.logger.warn("Broker/Client: FATAL: connection to MCP lost! send mcp service '" + serviceName + "', queue '" + queueName);
+        	        Data.logger.warn("Broker/Client: FATAL: connection to MCP lost! send mcp service '" + serviceName + "', queue '" + queueName + "'");
         	    }
         }
         if (this.mcpQueueFactory != null) try {
@@ -185,7 +185,7 @@ public class GridBroker extends PeerBroker implements Broker<byte[]> {
         	    // try to connect again..
         	    connectMCP(this.mcp_host, this.mcp_port);
             if (this.mcpQueueFactory == null) {
-                Data.logger.warn("Broker/Client: FATAL: connection to MCP lost! receive mcp service '" + serviceName + "', queue '" + queueName);
+                Data.logger.warn("Broker/Client: FATAL: connection to MCP lost! receive mcp service '" + serviceName + "', queue '" + queueName + "'");
             }
         }
         	if (this.mcpQueueFactory != null) try {
@@ -221,7 +221,7 @@ public class GridBroker extends PeerBroker implements Broker<byte[]> {
             // try to connect again..
             connectMCP(this.mcp_host, this.mcp_port);
             if (this.mcpQueueFactory == null) {
-                Data.logger.warn("Broker/Client: FATAL: connection to MCP lost! available mcp service '" + serviceName + "', queue '" + queueName);
+                Data.logger.warn("Broker/Client: FATAL: connection to MCP lost! available mcp service '" + serviceName + "', queue '" + queueName + "'");
             }
         }
         if (this.mcpQueueFactory != null) try {
@@ -253,7 +253,7 @@ public class GridBroker extends PeerBroker implements Broker<byte[]> {
                 // try to connect again..
                 connectMCP(this.mcp_host, this.mcp_port);
                 if (this.mcpQueueFactory == null) {
-                    Data.logger.warn("Broker/Client: FATAL: connection to MCP lost! send mcp service '" + serviceName + "', queue '" + queueName);
+                    Data.logger.warn("Broker/Client: FATAL: connection to MCP lost! send mcp service '" + serviceName + "', queue '" + queueName + "'");
                 }
         }
         if (this.mcpQueueFactory != null) try {
