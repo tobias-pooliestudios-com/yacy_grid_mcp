@@ -55,6 +55,7 @@ import org.elasticsearch.action.delete.DeleteRequest;
 import org.elasticsearch.action.delete.DeleteResponse;
 import org.elasticsearch.action.get.GetResponse;
 import org.elasticsearch.action.get.MultiGetItemResponse;
+import org.elasticsearch.action.get.MultiGetRequestBuilder;
 import org.elasticsearch.action.get.MultiGetResponse;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.action.search.SearchRequestBuilder;
@@ -127,6 +128,7 @@ public class ElasticsearchClient {
                 InetAddress i = InetAddress.getByName(a.substring(0, p));
                 int port = Integer.parseInt(a.substring(p + 1));
                 tc.addTransportAddress(new InetSocketTransportAddress(i, port));
+                //tc.addTransportAddress(new TransportAddress(i, port));
             } catch (UnknownHostException e) {
                 Data.logger.warn("", e);
             }
@@ -179,7 +181,6 @@ public class ElasticsearchClient {
                     .put("number_of_replicas", replicas);
             this.elasticsearchClient.admin().indices().prepareCreate(indexName)
                 .setSettings(settings)
-                .setUpdateAllTypes(true)
                 .execute().actionGet();
         } else {
             //LOGGER.debug("Index with name {} already exists", indexName);
@@ -190,7 +191,6 @@ public class ElasticsearchClient {
         try {
             this.elasticsearchClient.admin().indices().preparePutMapping(indexName)
                 .setSource(mapping)
-                .setUpdateAllTypes(true)
                 .setType("_default_").execute().actionGet();
         } catch (Throwable e) {
             Data.logger.warn("", e);
@@ -201,7 +201,6 @@ public class ElasticsearchClient {
         try {
             this.elasticsearchClient.admin().indices().preparePutMapping(indexName)
                 .setSource(mapping)
-                .setUpdateAllTypes(true)
                 .setType("_default_").execute().actionGet();
         } catch (Throwable e) {
             Data.logger.warn("", e);
@@ -212,7 +211,6 @@ public class ElasticsearchClient {
         try {
             this.elasticsearchClient.admin().indices().preparePutMapping(indexName)
                 .setSource(mapping, XContentType.JSON)
-                .setUpdateAllTypes(true)
                 .setType("_default_").execute().actionGet();
         } catch (Throwable e) {
             Data.logger.warn("", e);
@@ -223,7 +221,6 @@ public class ElasticsearchClient {
         try {
             this.elasticsearchClient.admin().indices().preparePutMapping(indexName)
                 .setSource(new String(Files.readAllBytes(json.toPath()), StandardCharsets.UTF_8), XContentType.JSON)
-                .setUpdateAllTypes(true)
                 .setType("_default_")
                 .execute()
                 .actionGet();
@@ -364,11 +361,12 @@ public class ElasticsearchClient {
     public boolean exist(String indexName, String typeName, final String id) {
         GetResponse getResponse = elasticsearchClient
                 .prepareGet(indexName, typeName, id)
-                .setOperationThreaded(false)
+                .setFetchSource(false)
+                //.setOperationThreaded(false)
                 .execute()
                 .actionGet();
         return getResponse.isExists();
-    }    
+    }
 
     public Set<String> existBulk(String indexName, String typeName, final Collection<String> ids) {
         if (ids == null || ids.size() == 0) return new HashSet<>();
@@ -378,13 +376,13 @@ public class ElasticsearchClient {
         Set<String> er = new HashSet<>();
         for (MultiGetItemResponse itemResponse : multiGetItemResponses) { 
             GetResponse response = itemResponse.getResponse();
-            if (response.isExists()) {                      
+            if (response.isExists()) {
                 er.add(response.getId());
             }
         }
         return er;
-    }    
-    
+    }
+
     /**
      * Get the type name of a document or null if the document does not exist.
      * This is a replacement of the exist() method which does exactly the same as exist()
@@ -463,11 +461,10 @@ public class ElasticsearchClient {
             for (SearchHit hit : response.getHits().getHits()) {
                 ids.put(hit.getId(), hit.getType());
             }
-            response = elasticsearchClient.prepareSearchScroll(response.getScrollId()).setScroll(new TimeValue(600000))
-                .execute().actionGet();
             // termination
-            if (response.getHits().getHits().length == 0)
-                break;
+            if (response.getHits().getHits().length == 0) break;
+            // scroll
+            response = elasticsearchClient.prepareSearchScroll(response.getScrollId()).setScroll(new TimeValue(600000)).execute().actionGet();
         }
         return deleteBulk(indexName, ids);
     }
@@ -500,6 +497,18 @@ public class ElasticsearchClient {
         GetResponse response = elasticsearchClient.prepareGet(indexName, typeName, id).execute().actionGet();
         Map<String, Object> map = getMap(response);
         return map;
+    }
+    
+    public Map<String, Map<String, Object>> readMapBulk(final String indexName, final String typeName, final Collection<String> ids) {
+        MultiGetRequestBuilder mgrb = elasticsearchClient.prepareMultiGet();
+        ids.forEach(id -> mgrb.add(indexName, typeName, id).execute().actionGet());
+        MultiGetResponse response = mgrb.execute().actionGet();
+        Map<String, Map<String, Object>> bulkresponse = new HashMap<>();
+        for (MultiGetItemResponse r: response.getResponses()) {
+            Map<String, Object> map = getMap(r.getResponse());
+            bulkresponse.put(r.getId(), map);
+        }
+        return bulkresponse;
     }
     
     protected static Map<String, Object> getMap(GetResponse response) {

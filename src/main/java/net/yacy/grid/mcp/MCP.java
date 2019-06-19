@@ -1,31 +1,33 @@
 /**
- * MCP
- * Copyright 14.01.2017 by Michael Peter Christen, @0rb1t3r
- * <p>
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
- * <p>
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Lesser General Public License for more details.
- * <p>
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program in the file lgpl21.txt
- * If not, see <http://www.gnu.org/licenses/>.
+ *  MCP
+ *  Copyright 14.01.2017 by Michael Peter Christen, @0rb1t3r
+ *
+ *  This library is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU Lesser General Public
+ *  License as published by the Free Software Foundation; either
+ *  version 2.1 of the License, or (at your option) any later version.
+ *  
+ *  This library is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *  Lesser General Public License for more details.
+ *  
+ *  You should have received a copy of the GNU Lesser General Public License
+ *  along with this program in the file lgpl21.txt
+ *  If not, see <http://www.gnu.org/licenses/>.
  */
 
 package net.yacy.grid.mcp;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.List;
 
 import javax.servlet.Servlet;
 
-import org.apache.log4j.Level;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -59,8 +61,6 @@ import net.yacy.grid.mcp.api.messages.SendService;
 import net.yacy.grid.tools.GitTool;
 import net.yacy.grid.tools.JSONList;
 import net.yacy.grid.tools.MultiProtocolURL;
-
-import net.yacy.grid.io.index.ElasticsearchClient.BulkEntry;
 
 /**
  * The Master Connect Program
@@ -118,69 +118,62 @@ public class MCP {
         public boolean processAction(SusiAction action, JSONArray data, String processName, int processNumber) {
             // find result of indexing with http://localhost:9200/web/crawler/_search?q=text_t:*
 
-            String sourceasset_path = action.getStringAttr("sourceasset");
-            if (sourceasset_path == null || sourceasset_path.length() == 0) return false;
+           String sourceasset_path = action.getStringAttr("sourceasset");
+           if (sourceasset_path == null || sourceasset_path.length() == 0) return false;
+            
+           try {
+               // get the message with parsed documents
+               JSONList jsonlist = null;
+               if (action.hasAsset(sourceasset_path)) {
+                   jsonlist = action.getJSONListAsset(sourceasset_path);
+           	   }
+               if (jsonlist == null) try {
+                   Asset<byte[]> asset = Data.gridStorage.load(sourceasset_path);
+                   byte[] source = asset.getPayload();
+                   jsonlist = new JSONList(new ByteArrayInputStream(source));
+               } catch (IOException e) {
+                   Data.logger.warn("MCP.processAction could not read asset from storage: " + sourceasset_path, e);
+                   return false;
+               }
 
-            try {
-                // get the message with parsed documents
-                JSONList jsonlist = null;
-                if (action.hasAsset(sourceasset_path)) {
-                    jsonlist = action.getJSONListAsset(sourceasset_path);
-                }
-                if (jsonlist == null) try {
-                    Asset<byte[]> asset = Data.gridStorage.load(sourceasset_path);
-                    byte[] source = asset.getPayload();
-                    jsonlist = new JSONList(new ByteArrayInputStream(source));
-                } catch (IOException e) {
-                    Data.logger.warn("MCP.processAction could not read asset from storage: " + sourceasset_path, e);
-                    return false;
-                }
+               // for each document, write search index and crawler index
+               indexloop: for (int line = 0; line < jsonlist.length(); line++) try {
+                   JSONObject json = jsonlist.get(line);
+                   if (json.has("index")) continue indexloop; // this is an elasticsearch index directive, we just skip that
 
-                List<BulkEntry> bulk = new ArrayList<>();
-                // for each document, write search index and crawler index
-                for (int line = 0; line < jsonlist.length(); line++) {
-                    try {
-                        JSONObject json = jsonlist.get(line);
-                        if (json.has("index"))
-                            continue; // this is an elasticsearch index directive, we just skip that
+                   // write search index
+                   String date = null;
+                   if (date == null && json.has(WebMapping.last_modified.getMapping().name())) date = WebMapping.last_modified.getMapping().name();
+                   if (date == null && json.has(WebMapping.load_date_dt.getMapping().name())) date = WebMapping.load_date_dt.getMapping().name();
+                   if (date == null && json.has(WebMapping.fresh_date_dt.getMapping().name())) date = WebMapping.fresh_date_dt.getMapping().name();
+                   String url = json.getString(WebMapping.url_s.getMapping().name());
+                   String urlid = MultiProtocolURL.getDigest(url);
+                   boolean created = Data.gridIndex.getElasticClient().writeMap("web", "crawler", urlid, json.toMap());
+                   Data.logger.info("MCP.processAction indexed " + ((line + 1)/2)  + "/" + jsonlist.length()/2 + "(" + (created ? "created" : "updated")+ "): " + url);
+                   //BulkEntry be = new BulkEntry(json.getString("url_s"), "crawler", date, null, json.toMap());
+                   //bulk.add(be);
 
-                        // write search index
-//                        String date = null;
-//                        if (date == null && json.has(WebMapping.last_modified.getMapping().name()))
-//                            date = WebMapping.last_modified.getMapping().name();
-//                        if (date == null && json.has(WebMapping.load_date_dt.getMapping().name()))
-//                            date = WebMapping.load_date_dt.getMapping().name();
-//                        if (date == null && json.has(WebMapping.fresh_date_dt.getMapping().name()))
-//                            date = WebMapping.fresh_date_dt.getMapping().name();
-                        String url = json.getString(WebMapping.url_s.getMapping().name());
-                        String urlid = MultiProtocolURL.getDigest(url);
-                        boolean created = Data.gridIndex.getElasticClient().writeMap("web", "web", urlid, json.toMap());
-                        Data.logger.info("MCP.processAction indexed " + ((line + 1) / 2) + "/" + jsonlist.length() / 2 + "(" + (created ? "created" : "updated") + "): " + url);
-//                        BulkEntry be = new BulkEntry(json.getString("url_s"), "crawler", date, json.toMap());
-//                        bulk.add(be);
-
-                        // write crawler index
-                        try {
-                            CrawlerDocument crawlerDocument = CrawlerDocument.load(Data.gridIndex, urlid);
-                            crawlerDocument.setStatus(Status.indexed).setStatusDate(new Date());
-                            crawlerDocument.store(Data.gridIndex, urlid);
-                            // check with http://localhost:9200/crawler/_search?q=status_s:indexed
-                        } catch (IOException e) {
-                            // well that should not happen
-                            Data.logger.warn("could not write crawler index", e);
-                        }
-                    } catch (JSONException je) {
-                        Data.logger.warn("", je);
-                    }
-                }
-//                Data.gridIndex.getElasticClient().writeMapBulk("web", bulk);
-                Data.logger.info("MCP.processAction processed indexing message from queue: " + sourceasset_path);
-                return true;
-            } catch (Throwable e) {
-                Data.logger.warn("MCP.processAction", e);
-                return false;
-            }
-        }
+                   // write crawler index
+                   try {
+                       CrawlerDocument crawlerDocument = CrawlerDocument.load(Data.gridIndex, urlid);
+                       crawlerDocument.setStatus(Status.indexed).setStatusDate(new Date());
+                       crawlerDocument.store(Data.gridIndex);
+                       // check with http://localhost:9200/crawler/_search?q=status_s:indexed
+                   } catch (IOException e) {
+                       // well that should not happen
+                       Data.logger.warn("could not write crawler index", e);
+                   }
+               } catch (JSONException je) {
+                   Data.logger.warn("", je);
+               }
+               //Data.index.writeMapBulk("web", bulk);
+        	       Data.logger.info("MCP.processAction processed indexing message from queue: " + sourceasset_path);
+        	       return true;
+           } catch (Throwable e) {
+               Data.logger.warn("MCP.processAction", e);
+               return false;
+           }
+       }
     }
 
     public static void main(String[] args) {

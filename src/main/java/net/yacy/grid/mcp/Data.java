@@ -22,9 +22,9 @@ package net.yacy.grid.mcp;
 import java.io.File;
 import java.util.Map;
 
+import org.apache.log4j.ConsoleAppender;
 import org.apache.log4j.Logger;
 import org.apache.log4j.PatternLayout;
-import org.apache.log4j.ConsoleAppender;
 
 import net.yacy.grid.YaCyServices;
 import net.yacy.grid.io.assets.GridStorage;
@@ -59,7 +59,6 @@ public class Data {
         logger.addAppender(logAppender);
         logger.addAppender(new ConsoleAppender(layout));
 
-
         config = cc;
         /*
         try {
@@ -68,10 +67,10 @@ public class Data {
         }
         */
         //swagger.getServlets().forEach(path -> System.out.println(swagger.getServlet(path).toString()));
-        
+
         gridServicePath = serviceData;
         if (!gridServicePath.exists()) gridServicePath.mkdirs();
-        
+
         // create databases
         File dbPath = new File(gridServicePath, "db");
         if (!dbPath.exists()) dbPath.mkdirs();
@@ -83,26 +82,15 @@ public class Data {
         if (!messagesPath.exists()) messagesPath.mkdirs();
         boolean lazy = config.containsKey("grid.broker.lazy") && config.get("grid.broker.lazy").equals("true");
         gridBroker = new GridBroker(lazy, localStorage ? messagesPath : null);
-        
+
         // create storage
         File assetsPath = new File(gridServicePath, "assets");
         boolean deleteafterread = cc.containsKey("grid.assets.delete") && cc.get("grid.assets.delete").equals("true");
         gridStorage = new GridStorage(deleteafterread, localStorage ? assetsPath : null);
-        
+
         // create index
-        String[] elasticsearchAddress = config.getOrDefault("grid.elasticsearch.address", "").split(",");
-        String elasticsearchClusterName = config.getOrDefault("grid.elasticsearch.clusterName", "");
-        for (String address: elasticsearchAddress) {
-            if (!OS.portIsOpen(address)) continue;
-            try {
-                gridIndex = new GridIndex();
-                gridIndex.connectElasticsearch(ElasticIndexFactory.PROTOCOL_PREFIX + address + "/" + elasticsearchClusterName);
-                break;
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-        
+        gridIndex = new GridIndex();
+
         // connect outside services
         // first try to connect to the configured MCPs.
         // if that fails, try to make all connections self
@@ -122,9 +110,11 @@ public class Data {
                 break;
             }
         }
-        
+
         if (!mcpConnected) {
             // try to connect to local services directly
+
+            // connect broker
             String[] gridBrokerAddress = (config.containsKey("grid.broker.address") ? config.get("grid.broker.address") : "").split(",");
             for (String address: gridBrokerAddress) {
                 if (!OS.portIsOpen(address)) continue;
@@ -136,6 +126,8 @@ public class Data {
             if (!Data.gridBroker.isRabbitMQConnected()) {
                 Data.logger.info("Connected to the embedded Broker");
             }
+
+            // connect storage
             String[] gridFtpAddress = (config.containsKey("grid.ftp.address") ? config.get("grid.ftp.address") : "").split(",");
             for (String address: gridFtpAddress) {
                 if (address.length() > 0 && Data.gridStorage.connectFTP(getHost(address), getPort(address, "2121"), getUser(address, "anonymous"), getPassword(address, "yacy"))) {
@@ -146,13 +138,27 @@ public class Data {
             if (!Data.gridStorage.isFTPConnected()) {
                 Data.logger.info("Connected to the embedded Asset Storage");
             }
+
+            // connect index
+            String[] elasticsearchAddress = config.getOrDefault("grid.elasticsearch.address", "").split(",");
+            String elasticsearchClusterName = config.getOrDefault("grid.elasticsearch.clusterName", "");
+            for (String address: elasticsearchAddress) {
+                if (!OS.portIsOpen(address)) continue;
+                try {
+                    gridIndex = new GridIndex();
+                    gridIndex.connectElasticsearch(ElasticIndexFactory.PROTOCOL_PREFIX + address + "/" + elasticsearchClusterName);
+                    break;
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
         }
-        
+
         // init boosts from configuration
         Map<String, String> defaultBoosts = Service.readDoubleConfig("boost.properties");
         boostsFactory = new BoostsFactory(defaultBoosts);
     }
-    
+
     public static String getHost(String address) {
         String hp = t(address, '@', address);
         return h(hp, ':', hp);

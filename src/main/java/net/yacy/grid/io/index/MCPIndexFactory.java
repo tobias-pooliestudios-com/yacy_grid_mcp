@@ -20,6 +20,11 @@
 package net.yacy.grid.io.index;
 
 import java.io.IOException;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -129,6 +134,17 @@ public class MCPIndexFactory implements IndexFactory {
             }
 
             @Override
+            public IndexFactory addBulk(String indexName, String typeName, final Map<String, JSONObject> objects) throws IOException {
+                // We do not introduce a new protocol here. Instead we use the add method.
+                // This is not a bad design because grid clients will learn how to use
+                // the native elasticsearch interface to do this in a better way.
+                for (Map.Entry<String, JSONObject> entry: objects.entrySet()) {
+                    add(indexName, typeName, entry.getKey(), entry.getValue());
+                }
+                return MCPIndexFactory.this;
+            }
+
+            @Override
             public boolean exist(String indexName, String typeName, String id) throws IOException {
                 params.put("index", indexName);
                 params.put("type", typeName);
@@ -142,6 +158,17 @@ public class MCPIndexFactory implements IndexFactory {
                 } else {
                     throw handleError(response);
                 }
+            }
+
+            public Set<String> existBulk(String indexName, String typeName, Collection<String> ids) throws IOException {
+                // We do not introduce a new protocol here. Instead we use the exist method.
+                // This is not a bad design because grid clients will learn how to use
+                // the native elasticsearch interface to do this in a better way.
+                Set<String> exists = new HashSet<>();
+                for (String id: ids) {
+                    if (exist(indexName, typeName, id)) exists.add(id);
+                }
+                return exists;
             }
 
             @Override
@@ -178,6 +205,21 @@ public class MCPIndexFactory implements IndexFactory {
                 } else {
                     throw handleError(response);
                 }
+            }
+            
+            @Override
+            public Map<String, JSONObject> queryBulk(String indexName, String typeName, Collection<String> ids) throws IOException {
+                // We do not introduce a new protocol here. Instead we use the query method.
+                // This is not a bad design because grid clients will learn how to use
+                // the native elasticsearch interface to do this in a better way.
+                Map<String, JSONObject> result = new HashMap<>();
+                for (String id: ids) {
+                    try {
+                        JSONObject j = query(indexName, typeName, id);
+                        result.put(id, j);
+                    } catch (IOException e) {}
+                }
+                return result;
             }
 
             @Override
