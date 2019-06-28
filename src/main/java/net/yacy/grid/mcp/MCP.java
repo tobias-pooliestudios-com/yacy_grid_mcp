@@ -64,7 +64,7 @@ import net.yacy.grid.tools.MultiProtocolURL;
 
 /**
  * The Master Connect Program
- *
+ * 
  * URL for RabbitMQ: http://searchlab.eu:15672/
  */
 public class MCP {
@@ -72,7 +72,7 @@ public class MCP {
     public final static YaCyServices MCP_SERVICE = YaCyServices.mcp;
     public final static YaCyServices INDEXER_SERVICE = YaCyServices.indexer;
     public final static String DATA_PATH = "data";
-
+ 
     // define services
     @SuppressWarnings("unchecked")
     public final static Class<? extends Servlet>[] MCP_SERVICES = new Class[]{
@@ -110,17 +110,17 @@ public class MCP {
 
     public static class IndexListener extends AbstractBrokerListener implements BrokerListener {
 
-        public IndexListener(YaCyServices service) {
+       public IndexListener(YaCyServices service) {
             super(service, Runtime.getRuntime().availableProcessors());
         }
 
-        @Override
-        public boolean processAction(SusiAction action, JSONArray data, String processName, int processNumber) {
-            // find result of indexing with http://localhost:9200/web/crawler/_search?q=text_t:*
+       @Override
+       public boolean processAction(SusiAction action, JSONArray data, String processName, int processNumber) {
+           // find result of indexing with http://localhost:9200/web/crawler/_search?q=text_t:*
 
            String sourceasset_path = action.getStringAttr("sourceasset");
            if (sourceasset_path == null || sourceasset_path.length() == 0) return false;
-            
+
            try {
                // get the message with parsed documents
                JSONList jsonlist = null;
@@ -167,8 +167,8 @@ public class MCP {
                    Data.logger.warn("", je);
                }
                //Data.index.writeMapBulk("web", bulk);
-        	       Data.logger.info("MCP.processAction processed indexing message from queue: " + sourceasset_path);
-        	       return true;
+               Data.logger.info("MCP.processAction processed indexing message from queue: " + sourceasset_path);
+               return true;
            } catch (Throwable e) {
                Data.logger.warn("MCP.processAction", e);
                return false;

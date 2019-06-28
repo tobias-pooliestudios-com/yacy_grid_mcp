@@ -92,7 +92,7 @@ public abstract class AbstractBroker<A> implements Broker<A> {
     
 
     @Override
-    public abstract MessageContainer<A> receive(final Services service, final GridQueue queue, long timeout) throws IOException;
+    public abstract MessageContainer<A> receive(final Services service, final GridQueue queue, long timeout, boolean autoAck) throws IOException;
 
     @Override
     public abstract AvailableContainer available(final Services service, final GridQueue queue) throws IOException;
@@ -144,7 +144,7 @@ public abstract class AbstractBroker<A> implements Broker<A> {
     private int leastFilled(AvailableContainer[] ac) throws IOException {
         if (ac.length == 1) return 0;
         int index = random.nextInt(ac.length);
-        int leastAvailable = Integer.MAX_VALUE;
+        long leastAvailable = Long.MAX_VALUE;
         List<Integer> zeroCandidates = new ArrayList<>();
         for (int i = 0; i < ac.length; i++) {
             if (ac[i].getAvailable() == 0) zeroCandidates.add(i);

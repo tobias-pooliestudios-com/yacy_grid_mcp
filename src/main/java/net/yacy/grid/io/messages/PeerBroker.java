@@ -71,17 +71,30 @@ public class PeerBroker extends AbstractBroker<byte[]> implements Broker<byte[]>
     }
 
     @Override
-    public MessageContainer<byte[]> receive(Services service, GridQueue queueName, long timeout) throws IOException {
+    public MessageContainer<byte[]> receive(Services service, GridQueue queueName, long timeout, boolean autoAck) throws IOException {
         QueueFactory<byte[]> factory = getConnector(service);
         Queue<byte[]> mq = factory.getQueue(queueName.name());
-        byte[] message = mq.receive(timeout);
-        return new MessageContainer<byte[]>(factory, message == null ? null : message);
+        return mq.receive(timeout, autoAck);
+    }
+
+    @Override
+    public QueueFactory<byte[]> acknowledge(Services service, GridQueue queueName, long deliveryTag) throws IOException {
+        QueueFactory<byte[]> factory = getConnector(service);
+        factory.getQueue(queueName.name()).acknowledge(deliveryTag);
+        return factory;
+    }
+
+    @Override
+    public QueueFactory<byte[]> recover(Services service, GridQueue queueName) throws IOException {
+        QueueFactory<byte[]> factory = getConnector(service);
+        factory.getQueue(queueName.name()).recover();
+        return factory;
     }
 
     @Override
     public AvailableContainer available(Services service, GridQueue queueName) throws IOException {
         QueueFactory<byte[]> factory = getConnector(service);
-        return new AvailableContainer(factory, getConnector(service).getQueue(queueName.name()).available());
+        return new AvailableContainer(factory, queueName.name, getConnector(service).getQueue(queueName.name()).available());
     }
 
     @Override

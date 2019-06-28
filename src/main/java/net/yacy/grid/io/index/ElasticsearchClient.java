@@ -505,8 +505,11 @@ public class ElasticsearchClient {
         MultiGetResponse response = mgrb.execute().actionGet();
         Map<String, Map<String, Object>> bulkresponse = new HashMap<>();
         for (MultiGetItemResponse r: response.getResponses()) {
-            Map<String, Object> map = getMap(r.getResponse());
-            bulkresponse.put(r.getId(), map);
+            GetResponse gr = r.getResponse();
+            if (gr != null) {
+                Map<String, Object> map = getMap(gr);
+                bulkresponse.put(r.getId(), map);
+            }
         }
         return bulkresponse;
     }
@@ -628,19 +631,21 @@ public class ElasticsearchClient {
             if (be.id == null) continue;
             bulkRequest.add(
                     elasticsearchClient.prepareIndex(indexName, be.type, be.id).setSource(be.jsonMap)
-                        .setVersion(1)
                         .setCreate(false) // enforces OpType.INDEX
-                        .setVersionType(VersionType.EXTERNAL_GTE));
+                        .setVersionType(VersionType.INTERNAL));
         }
         BulkResponse bulkResponse = bulkRequest.get();
         BulkWriteResult result = new BulkWriteResult();
         for (BulkItemResponse r: bulkResponse.getItems()) {
             String id = r.getId();
             DocWriteResponse response = r.getResponse();
-            if (response.getResult() == DocWriteResponse.Result.CREATED) result.created.add(id);
-            String err = r.getFailureMessage();
-            if (err != null) {
-                result.errors.put(id, err);
+            if (response == null) {
+                String err = r.getFailureMessage();
+                if (err != null) {
+                    result.errors.put(id, err);
+                }
+            } else {
+                if (response.getResult() == DocWriteResponse.Result.CREATED) result.created.add(id);
             }
         }
         long duration = Math.max(1, System.currentTimeMillis() - start);

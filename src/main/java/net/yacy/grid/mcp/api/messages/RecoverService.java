@@ -1,6 +1,6 @@
 /**
- *  ReceiveService
- *  Copyright 28.1.2017 by Michael Peter Christen, @0rb1t3r
+ *  RecoverService
+ *  Copyright 26.6.2019 by Michael Peter Christen, @0rb1t3r
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -20,7 +20,6 @@
 package net.yacy.grid.mcp.api.messages;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 
 import javax.servlet.http.HttpServletResponse;
 
@@ -32,17 +31,16 @@ import net.yacy.grid.http.ObjectAPIHandler;
 import net.yacy.grid.http.Query;
 import net.yacy.grid.http.ServiceResponse;
 import net.yacy.grid.io.messages.GridQueue;
-import net.yacy.grid.io.messages.MessageContainer;
 import net.yacy.grid.mcp.Data;
 
 /**
  * test: call
- * http://127.0.0.1:8100/yacy/grid/mcp/messages/receive.json?serviceName=testService&queueName=testQueue
+ * http://127.0.0.1:8100/yacy/grid/mcp/messages/recover.json?serviceName=crawler&queueName=webcrawler_00
  */
-public class ReceiveService extends ObjectAPIHandler implements APIHandler {
+public class RecoverService extends ObjectAPIHandler implements APIHandler {
 
     private static final long serialVersionUID = 8578478303031749879L;
-    public static final String NAME = "receive";
+    public static final String NAME = "recover";
     
     @Override
     public String getAPIPath() {
@@ -53,24 +51,11 @@ public class ReceiveService extends ObjectAPIHandler implements APIHandler {
     public ServiceResponse serviceImpl(Query call, HttpServletResponse response) {
         String serviceName = call.get("serviceName", "");
         String queueName = call.get("queueName", "");
-        boolean autoAck = "true".equals(call.get("autoAck", "true"));
-        long timeout = call.get("timeout", -1);
         JSONObject json = new JSONObject(true);
         if (serviceName.length() > 0 && queueName.length() > 0) {
             try {
-                MessageContainer<byte[]> message = Data.gridBroker.receive(YaCyServices.valueOf(serviceName), new GridQueue(queueName), timeout, autoAck);
-                // message can be null if a timeout occurred
-                if (message == null) {
-                    json.put(ObjectAPIHandler.SUCCESS_KEY, false);
-                    json.put(ObjectAPIHandler.COMMENT_KEY, "timeout");
-                } else {
-                    String url = message.getFactory().getConnectionURL();
-                    byte[] payload = message.getPayload();
-                    json.put(ObjectAPIHandler.MESSAGE_KEY, payload == null ? "" : new String(payload, StandardCharsets.UTF_8));
-                    json.put(ObjectAPIHandler.DELIVERY_TAG, message.getDeliveryTag());
-                    json.put(ObjectAPIHandler.SUCCESS_KEY, true);
-                    if (url != null) json.put(ObjectAPIHandler.SERVICE_KEY, url);
-                }
+                Data.gridBroker.recover(YaCyServices.valueOf(serviceName), new GridQueue(queueName));
+                json.put(ObjectAPIHandler.SUCCESS_KEY, true);
             } catch (IOException e) {
                 json.put(ObjectAPIHandler.SUCCESS_KEY, false);
                 json.put(ObjectAPIHandler.COMMENT_KEY, e.getMessage());
