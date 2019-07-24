@@ -24,12 +24,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
-//import java.util.concurrent.Executors;
-//import java.util.concurrent.ThreadPoolExecutor;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import org.eclipse.jetty.util.ConcurrentHashSet;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -40,6 +36,7 @@ import ai.susi.mind.SusiThought;
 import net.yacy.grid.Services;
 import net.yacy.grid.YaCyServices;
 import net.yacy.grid.io.messages.AvailableContainer;
+import net.yacy.grid.io.messages.GridBroker;
 import net.yacy.grid.io.messages.GridQueue;
 import net.yacy.grid.io.messages.MessageContainer;
 import net.yacy.grid.tools.Memory;
@@ -48,20 +45,19 @@ public abstract class AbstractBrokerListener implements BrokerListener {
 
     public boolean shallRun;
     private final Services service;
-    private final GridQueue[] queueNames;
+    private final GridQueue[] sourceQueues;
     private final int threadCount;
     private final List<QueueListener> threads;
-    private final Set<String> servicequeues;
-    //private final ThreadPoolExecutor threadPool;
+    private final AtomicInteger targetFill;
 
     public AbstractBrokerListener(final Services service, final int threadCount) {
         this.service = service;
-        this.queueNames = service.getQueues();
+        this.sourceQueues = service.getSourceQueues();
         this.threadCount = threadCount;
         //    this.threadPool = (ThreadPoolExecutor) Executors.newFixedThreadPool(this.threads);
         this.shallRun = true;
         this.threads = new ArrayList<>();
-        this.servicequeues = ConcurrentHashMap.newKeySet();
+        this.targetFill = new AtomicInteger(0);
     }
 
     public abstract boolean processAction(SusiAction action, JSONArray data, String processName, int processNumber);
@@ -69,7 +65,7 @@ public abstract class AbstractBrokerListener implements BrokerListener {
     @Override
     public void run() {
         // recover unacknowledged entries - possibly from last start
-        for (GridQueue queue: this.queueNames) {
+        for (GridQueue queue: this.sourceQueues) {
             try {
                 Data.gridBroker.recover(AbstractBrokerListener.this.service, queue);
             } catch (IOException e) {
@@ -79,7 +75,7 @@ public abstract class AbstractBrokerListener implements BrokerListener {
 
         // print out some stats about the queues
         try {
-            AvailableContainer[] ac = Data.gridBroker.available(AbstractBrokerListener.this.service, this.queueNames);
+            AvailableContainer[] ac = Data.gridBroker.available(AbstractBrokerListener.this.service, this.sourceQueues);
             for (int i = 0; i < ac.length; i++) {
                 Data.logger.info("Service " + this.service.name() + ", queue " + ac[i].getQueue() + ": " + ac[i].getAvailable() + " entries.");
             }
@@ -88,11 +84,11 @@ public abstract class AbstractBrokerListener implements BrokerListener {
         }
 
         // start the listeners
-        int threadsPerQueue = Math.max(1, this.threadCount / this.queueNames.length);
-        Data.logger.info("Broker Listener: starting " + threadsPerQueue + " threads for each of the " + this.queueNames.length + " queues");
-        for (GridQueue queue: this.queueNames) {
+        int threadsPerQueue = Math.max(1, this.threadCount / this.sourceQueues.length);
+        Data.logger.info("Broker Listener: starting " + threadsPerQueue + " threads for each of the " + this.sourceQueues.length + " queues");
+        for (GridQueue queue: this.sourceQueues) {
             for (int qc = 0; qc < threadsPerQueue; qc++) {
-                QueueListener listener = new QueueListener(queue, qc, Data.gridBroker.isAutoAck());
+                QueueListener listener = new QueueListener(queue, qc, Data.gridBroker.isAutoAck(), Data.gridBroker.getQueueThrottling());
                 listener.start();
                 threads.add(listener);
                 Data.logger.info("Broker Listener for service " + this.service.name() + ", queue " + queue + " started thread " + qc);
@@ -133,22 +129,19 @@ public abstract class AbstractBrokerListener implements BrokerListener {
         @Override
         public void run() {
             while (shallRun) {
-                try {Thread.sleep(60000);} catch (InterruptedException ee) {}
-
                 // collect size of target queues:
-                int targetsize = 0;
-                for (String servicequeue: AbstractBrokerListener.this.servicequeues) {
-                    int p = servicequeue.indexOf(':');
-                    String type = servicequeue.substring(0, p);
-                    String queue = servicequeue.substring(p + 1);
-                    try {
-                        AvailableContainer ac = Data.gridBroker.available(YaCyServices.valueOf(type), new GridQueue(queue));
-                        targetsize += ac.getAvailable();
-                    } catch (IOException e) {
-                    }
+                int targetQueueAggregator = 0;
+                for (Services targetService: AbstractBrokerListener.this.service.getTargetServices()) {
+                    for (GridQueue targetQueue: targetService.getSourceQueues()) try {
+                        AvailableContainer a = Data.gridBroker.available(targetService, targetQueue);
+                        targetQueueAggregator += a.getAvailable();
+                    } catch (IOException e) {}
                 }
+                AbstractBrokerListener.this.targetFill.set(targetQueueAggregator);
+                Data.logger.info("BrokerListener operates with " + AbstractBrokerListener.this.messagesPerMinute() + " messages per minute; target queues size: " + targetQueueAggregator);
 
-                Data.logger.info("BrokerListener operates with" + AbstractBrokerListener.this.messagesPerMinute() + " messages per minute; target queues size: " + targetsize);
+                // wait a bit
+                try {Thread.sleep(60000);} catch (InterruptedException ee) {}
             }
         }
     }
@@ -158,11 +151,13 @@ public abstract class AbstractBrokerListener implements BrokerListener {
         private final int threadCounter;
         private final boolean autoAck;
         private final LinkedList<Long> tracker;
+        private final long targetQueueThrottling;
 
-        public QueueListener(final GridQueue queueName, final int threadCounter, final boolean autoAck) {
+        public QueueListener(final GridQueue queueName, final int threadCounter, final boolean autoAck, int queueThrottling) {
             this.queueName = queueName;
             this.threadCounter = threadCounter;
             this.autoAck = autoAck;
+            this.targetQueueThrottling = queueThrottling;
             this.tracker = new LinkedList<>();
         }
 
@@ -193,6 +188,20 @@ public abstract class AbstractBrokerListener implements BrokerListener {
                         Data.clearCaches();
                     }
 
+                    // check target throttling
+                    if (this.targetQueueThrottling > 0) {
+                        long throttlingStart = this.targetQueueThrottling / 10 * 9;
+                        long targetQueueAggregator = AbstractBrokerListener.this.targetFill.get();
+                        Data.logger.info("AbstractBrokerListener.QueueListener target queue aggregated size = " + targetQueueAggregator + ", throttling start is " + throttlingStart);
+                        if (targetQueueAggregator > throttlingStart) {
+                            long throttlingTime = Math.min(10000L, (targetQueueAggregator - throttlingStart) / this.targetQueueThrottling * 100000L);
+                            if (throttlingTime > 1000L) {
+                                Data.logger.info("AbstractBrokerListener.QueueListener throttling = " + this.targetQueueThrottling + ", sleeping for " + throttlingTime + " milliseconds");
+                                try {Thread.sleep(throttlingTime);} catch (InterruptedException e) {}
+                            }
+                        }
+                    }
+
                     // wait until message arrives
                     mc = Data.gridBroker.receive(AbstractBrokerListener.this.service, this.queueName, 10000, autoAck);
                     if (mc != null && mc.getPayload() != null && mc.getPayload().length > 0) {
@@ -212,6 +221,19 @@ public abstract class AbstractBrokerListener implements BrokerListener {
                 } catch (Throwable e) {
                     Data.logger.info("QueueListener: " + e.getMessage(), e);
                     try {Thread.sleep(10000);} catch (InterruptedException ee) {}
+                    String m = e.getMessage();
+                    if (m == null) m = e.getCause().getMessage();
+                    if (m.equals(GridBroker.TARGET_LIMIT_MESSAGE)) {
+                        // do not process message!
+                        if (!this.autoAck && mc != null && mc.getDeliveryTag() > 0) {
+                            // reject the message
+                            try {
+                                Data.gridBroker.reject(AbstractBrokerListener.this.service, this.queueName, mc.getDeliveryTag());
+                            } catch (IOException ee) {
+                                Data.logger.info("QueueListener: cannot acknowledge queue: " + ee.getMessage(), ee);
+                            }
+                        }
+                    }
                 } finally {
                     if (!this.autoAck && mc != null && mc.getDeliveryTag() > 0) {
                         // acknowledge the message
@@ -226,7 +248,9 @@ public abstract class AbstractBrokerListener implements BrokerListener {
         }
     }
 
-    private void handleMessage(final MessageContainer<byte[]> mc, final String processName, final int processNumber) {
+    private void handleMessage(final MessageContainer<byte[]> mc, final String processName, final int processNumber) throws IOException {
+        Thread.currentThread().setName(processName + "-" + processNumber + "-running");
+
         String payload = new String(mc.getPayload(), StandardCharsets.UTF_8);
         JSONObject json = new JSONObject(new JSONTokener(payload));
         final SusiThought process = new SusiThought(json);
@@ -251,35 +275,14 @@ public abstract class AbstractBrokerListener implements BrokerListener {
                 try {
                     loadNextAction(action, process.getData()); // put that into the correct queue
                 } catch (Throwable e) {
+                    if (e.getMessage().equals(GridBroker.TARGET_LIMIT_MESSAGE)) throw e;
                     Data.logger.warn("", e);
                 }
                 continue actionloop;
             }
 
             // process the action using the previously acquired execution thread
-            //this.threadPool.execute(new ActionProcess(action, data));
-            new ActionProcess(action, data, processName, processNumber).run(); // run, not start: we execute this in the current thread
-        }
-    }
-
-    private final class ActionProcess implements Runnable {
-
-        private final SusiAction action;
-        private final JSONArray data;
-        private final String processName;
-        private final int processNumber;
-
-        public ActionProcess(final SusiAction action, final JSONArray data, final String processName, final int processNumber) {
-            this.action = action;
-            this.data = data;
-            this.processName = processName;
-            this.processNumber = processNumber;
-        }
-
-        @Override
-        public void run() {
-            Thread.currentThread().setName(this.processName + "-" + this.processNumber + "-running");
-            boolean processed = processAction(this.action, this.data, this.processName, this.processNumber);
+            boolean processed = processAction(action, data, processName, processNumber);
             if (processed) {
                 // send next embedded action(s) to queue
                 JSONObject ao = action.toJSONClone();
@@ -291,6 +294,7 @@ public abstract class AbstractBrokerListener implements BrokerListener {
                         } catch (UnsupportedOperationException | JSONException e) {
                             Data.logger.warn("", e);
                         } catch (IOException e) {
+                            if (e.getMessage().equals(GridBroker.TARGET_LIMIT_MESSAGE)) throw e;
                             Data.logger.warn("", e);
                             // do a re-try
                             try {Thread.sleep(10000);} catch (InterruptedException e1) {}
@@ -318,8 +322,6 @@ public abstract class AbstractBrokerListener implements BrokerListener {
                 .put("actions", new JSONArray().put(action.toJSONClone()));
         byte[] b = nextProcess.toString(2).getBytes(StandardCharsets.UTF_8);
         Data.gridBroker.send(YaCyServices.valueOf(type), new GridQueue(queue), b);
-        // remember which service queues are targets
-        this.servicequeues.add(type + ":" + queue);
     }
 
     @Override
