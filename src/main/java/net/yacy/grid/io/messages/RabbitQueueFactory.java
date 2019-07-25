@@ -159,7 +159,7 @@ public class RabbitQueueFactory implements QueueFactory<byte[]> {
             Map<String, Object> arguments = new HashMap<>();
             arguments.put("x-queue-mode", lazy.get() ? "lazy" : "default"); // we want to minimize memory usage; see http://www.rabbitmq.com/lazy-queues.html
             if (queueLimit.get() > 0) {
-                arguments.put("x-max-length", 10);
+                arguments.put("x-max-length", queueLimit.get());
                 arguments.put("x-overflow", "reject-publish");
             }
             this.channel = RabbitQueueFactory.this.getChannel();
