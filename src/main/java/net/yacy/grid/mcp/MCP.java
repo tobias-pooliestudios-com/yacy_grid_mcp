@@ -6,12 +6,12 @@
  *  modify it under the terms of the GNU Lesser General Public
  *  License as published by the Free Software Foundation; either
  *  version 2.1 of the License, or (at your option) any later version.
- *  
+ *
  *  This library is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  *  Lesser General Public License for more details.
- *  
+ *
  *  You should have received a copy of the GNU Lesser General Public License
  *  along with this program in the file lgpl21.txt
  *  If not, see <http://www.gnu.org/licenses/>.
@@ -41,6 +41,7 @@ import net.yacy.grid.io.index.CrawlerDocument.Status;
 import net.yacy.grid.mcp.api.admin.InquirySubmitService;
 import net.yacy.grid.mcp.api.assets.LoadService;
 import net.yacy.grid.mcp.api.assets.StoreService;
+import net.yacy.grid.mcp.api.control.LoaderThrottlingService;
 import net.yacy.grid.mcp.api.index.AddService;
 import net.yacy.grid.mcp.api.index.CheckService;
 import net.yacy.grid.mcp.api.index.CountService;
@@ -66,7 +67,7 @@ import net.yacy.grid.tools.MultiProtocolURL;
 
 /**
  * The Master Connect Program
- * 
+ *
  * URL for RabbitMQ: http://searchlab.eu:15672/
  */
 public class MCP {
@@ -74,7 +75,7 @@ public class MCP {
     public final static YaCyServices MCP_SERVICE = YaCyServices.mcp;
     public final static YaCyServices INDEXER_SERVICE = YaCyServices.indexer;
     public final static String DATA_PATH = "data";
- 
+
     // define services
     @SuppressWarnings("unchecked")
     public final static Class<? extends Servlet>[] MCP_SERVICES = new Class[]{
@@ -83,6 +84,9 @@ public class MCP {
             StatusService.class,
             ThreaddumpService.class,
             LogService.class,
+
+            // control services
+            LoaderThrottlingService.class,
 
             // message services
             AcknowledgeService.class,
@@ -119,11 +123,11 @@ public class MCP {
         }
 
        @Override
-       public boolean processAction(SusiAction action, JSONArray data, String processName, int processNumber) {
+       public ActionResult processAction(SusiAction action, JSONArray data, String processName, int processNumber) {
            // find result of indexing with http://localhost:9200/web/crawler/_search?q=text_t:*
 
            String sourceasset_path = action.getStringAttr("sourceasset");
-           if (sourceasset_path == null || sourceasset_path.length() == 0) return false;
+           if (sourceasset_path == null || sourceasset_path.length() == 0) return ActionResult.FAIL_IRREVERSIBLE;
 
            try {
                // get the message with parsed documents
@@ -137,7 +141,7 @@ public class MCP {
                    jsonlist = new JSONList(new ByteArrayInputStream(source));
                } catch (IOException e) {
                    Data.logger.warn("MCP.processAction could not read asset from storage: " + sourceasset_path, e);
-                   return false;
+                   return ActionResult.FAIL_IRREVERSIBLE;
                }
 
                // for each document, write search index and crawler index
@@ -172,10 +176,10 @@ public class MCP {
                }
                //Data.index.writeMapBulk("web", bulk);
                Data.logger.info("MCP.processAction processed indexing message from queue: " + sourceasset_path);
-               return true;
+               return ActionResult.SUCCESS;
            } catch (Throwable e) {
                Data.logger.warn("MCP.processAction", e);
-               return false;
+               return ActionResult.FAIL_IRREVERSIBLE;
            }
        }
     }
