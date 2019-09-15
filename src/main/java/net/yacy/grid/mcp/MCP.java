@@ -6,12 +6,12 @@
  *  modify it under the terms of the GNU Lesser General Public
  *  License as published by the Free Software Foundation; either
  *  version 2.1 of the License, or (at your option) any later version.
- *
+ *  
  *  This library is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  *  Lesser General Public License for more details.
- *
+ *  
  *  You should have received a copy of the GNU Lesser General Public License
  *  along with this program in the file lgpl21.txt
  *  If not, see <http://www.gnu.org/licenses/>.
@@ -67,7 +67,7 @@ import net.yacy.grid.tools.MultiProtocolURL;
 
 /**
  * The Master Connect Program
- *
+ * 
  * URL for RabbitMQ: http://searchlab.eu:15672/
  */
 public class MCP {
@@ -75,7 +75,7 @@ public class MCP {
     public final static YaCyServices MCP_SERVICE = YaCyServices.mcp;
     public final static YaCyServices INDEXER_SERVICE = YaCyServices.indexer;
     public final static String DATA_PATH = "data";
-
+ 
     // define services
     @SuppressWarnings("unchecked")
     public final static Class<? extends Servlet>[] MCP_SERVICES = new Class[]{
@@ -134,7 +134,7 @@ public class MCP {
                JSONList jsonlist = null;
                if (action.hasAsset(sourceasset_path)) {
                    jsonlist = action.getJSONListAsset(sourceasset_path);
-           	   }
+                  }
                if (jsonlist == null) try {
                    Asset<byte[]> asset = Data.gridStorage.load(sourceasset_path);
                    byte[] source = asset.getPayload();
@@ -156,7 +156,7 @@ public class MCP {
                    if (date == null && json.has(WebMapping.fresh_date_dt.getMapping().name())) date = WebMapping.fresh_date_dt.getMapping().name();
                    String url = json.getString(WebMapping.url_s.getMapping().name());
                    String urlid = MultiProtocolURL.getDigest(url);
-                   boolean created = Data.gridIndex.getElasticClient().writeMap("web", "crawler", urlid, json.toMap());
+                   boolean created = Data.gridIndex.getElasticClient().writeMap(GridIndex.WEB_INDEX_NAME, GridIndex.WEB_TYPE_NAME, urlid, json.toMap());
                    Data.logger.info("MCP.processAction indexed " + ((line + 1)/2)  + "/" + jsonlist.length()/2 + "(" + (created ? "created" : "updated")+ "): " + url);
                    //BulkEntry be = new BulkEntry(json.getString("url_s"), "crawler", date, null, json.toMap());
                    //bulk.add(be);
@@ -174,7 +174,7 @@ public class MCP {
                } catch (JSONException je) {
                    Data.logger.warn("", je);
                }
-               //Data.index.writeMapBulk("web", bulk);
+               //Data.index.writeMapBulk(GridIndex.WEB_INDEX_NAME, bulk);
                Data.logger.info("MCP.processAction processed indexing message from queue: " + sourceasset_path);
                return ActionResult.SUCCESS;
            } catch (Throwable e) {
