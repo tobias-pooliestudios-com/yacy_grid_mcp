@@ -38,6 +38,7 @@ import net.yacy.grid.io.assets.Asset;
 import net.yacy.grid.io.index.CrawlerDocument;
 import net.yacy.grid.io.index.WebMapping;
 import net.yacy.grid.io.index.CrawlerDocument.Status;
+import net.yacy.grid.io.index.GridIndex;
 import net.yacy.grid.mcp.api.admin.InquirySubmitService;
 import net.yacy.grid.mcp.api.assets.LoadService;
 import net.yacy.grid.mcp.api.assets.StoreService;
