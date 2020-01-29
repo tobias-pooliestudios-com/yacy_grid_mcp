@@ -20,6 +20,7 @@
 package net.yacy.grid.mcp;
 
 import java.io.File;
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Map;
@@ -40,7 +41,7 @@ import net.yacy.grid.io.messages.GridBroker;
 import net.yacy.grid.tools.OS;
 
 public class Data {
-    
+
     public static File gridServicePath;
     public static PeerDatabase peerDB;
     public static JSONDatabase peerJsonDB;
@@ -52,16 +53,18 @@ public class Data {
     public static Map<String, String> config;
     public static LogAppender logAppender;
     public static BoostsFactory boostsFactory;
-    
+
     //public static Swagger swagger;
-    
+
     public static void init(File serviceData, Map<String, String> cc, boolean localStorage) {
         PatternLayout layout = new PatternLayout("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %p %c %x - %m%n");
         logger = Logger.getRootLogger();
         logger.removeAllAppenders();
         logAppender = new LogAppender(layout, 100000);
         logger.addAppender(logAppender);
-        logger.addAppender(new ConsoleAppender(layout));
+        ConsoleAppender ca = new ConsoleAppender(layout);
+        ca.setImmediateFlush(false);
+        logger.addAppender(ca);
 
         config = cc;
         /*
@@ -173,6 +176,9 @@ public class Data {
                 }
             }
         }
+
+        // find connections first here before concurrent threads try to make their own connection concurrently
+        try { Data.gridIndex.checkConnection(); } catch (IOException e) { Data.logger.fatal("no connection to MCP", e); }
 
         // init boosts from configuration
         Map<String, String> defaultBoosts = Service.readDoubleConfig("boost.properties");
