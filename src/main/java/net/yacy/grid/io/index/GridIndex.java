@@ -58,9 +58,9 @@ public class GridIndex implements Index {
         this.mcp_port = -1;
         this.shallRun = true;
     }
-    
+
     public boolean isConnected() {
-    	return this.elastic_address != null && this.elasticIndexFactory != null;
+        return this.elastic_address != null && this.elasticIndexFactory != null;
     }
 
     public boolean connectElasticsearch(String address) {
@@ -445,6 +445,16 @@ public class GridIndex implements Index {
             Data.logger.debug("Index/Client: delete mcp service '" + mcp_host + "', mcp fail", e);
         }
         throw new IOException("Index/Client: delete mcp service: no factory found!");
+    }
+
+    @Override
+    public void refresh(String indexName) {
+        if (this.elasticIndexFactory == null) try {
+            Thread.sleep(1000);
+        } catch (InterruptedException e) {}
+        else try {
+            this.elasticIndexFactory.getIndex().refresh(indexName);
+        } catch (IOException e) {}
     }
 
     @Override
