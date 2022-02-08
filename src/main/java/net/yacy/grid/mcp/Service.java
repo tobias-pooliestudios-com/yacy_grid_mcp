@@ -1,17 +1,17 @@
 /**
  *  Service
- *  Copyright 16.01.2017 by Michael Peter Christen, @0rb1t3r
+ *  Copyright 16.01.2017 by Michael Peter Christen, @orbiterlab
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
  *  License as published by the Free Software Foundation; either
  *  version 2.1 of the License, or (at your option) any later version.
- *  
+ *
  *  This library is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  *  Lesser General Public License for more details.
- *  
+ *
  *  You should have received a copy of the GNU Lesser General Public License
  *  along with this program in the file lgpl21.txt
  *  If not, see <http://www.gnu.org/licenses/>.
@@ -38,6 +38,7 @@ import com.hazelcast.core.HazelcastInstance;
 import net.yacy.grid.YaCyServices;
 import net.yacy.grid.http.APIServer;
 import net.yacy.grid.mcp.api.info.StatusService;
+import net.yacy.grid.tools.Logger;
 import net.yacy.grid.tools.MapUtil;
 
 /**
@@ -107,6 +108,12 @@ public enum Service {
         // find data path
         int port = Integer.parseInt(config.get("port"));
         Data.init(dataInstancePath(data_dir, port), config, localStorage);
+
+        // start hazelcast service
+        Config hazelcastconfig = new Config().setClusterName("YaCyGrid").setInstanceName(Service.type.name());
+        hazelcast = Hazelcast.newHazelcastInstance(hazelcastconfig);
+        String uuid = hazelcast.getCluster().getLocalMember().getUuid().toString();
+        hazelcast.getMap("status").put(uuid, StatusService.status());
     }
 
     /**
@@ -148,13 +155,7 @@ public enum Service {
             port = APIServer.open(port, html_path, portForce);
 
             // give positive feedback
-            Data.logger.info("Service started at port " + port);
-
-            // start hazelcast service
-            Config config = new Config().setClusterName("YaCyGrid").setInstanceName(Service.type.name());
-            hazelcast = Hazelcast.newHazelcastInstance(config);
-            String uuid = hazelcast.getCluster().getLocalMember().getUuid().toString();
-            hazelcast.getMap("status").put(uuid, StatusService.status());
+            Logger.info("Service started at port " + port);
 
             // prepare shutdown signal
             boolean pidkillfileCreated = false;
@@ -169,20 +170,20 @@ public enum Service {
                 pidfile.createNewFile();
                 if (pidfile.exists()) {pidfile.deleteOnExit(); pidkillfileCreated = true;}
             } catch (IOException e) {
-                Data.logger.info("pid file " + pidfile.getAbsolutePath() + " creation failed: " + e.getMessage());
+                Logger.info("pid file " + pidfile.getAbsolutePath() + " creation failed: " + e.getMessage());
             }
             if (!killfile.exists()) try {
                 killfile.createNewFile();
                 if (killfile.exists()) killfile.deleteOnExit(); else pidkillfileCreated = false;
             } catch (IOException e) {
-                Data.logger.info("kill file " + killfile.getAbsolutePath() + " creation failed: " + e.getMessage());
+                Logger.info("kill file " + killfile.getAbsolutePath() + " creation failed: " + e.getMessage());
                 pidkillfileCreated = false;
             }
 
             // wait for shutdown signal (kill on process)
             if (pidkillfileCreated) {
                 // we can control this by deletion of the kill file
-                Data.logger.info("to stop this process, delete kill file " + killfile.getAbsolutePath());
+                Logger.info("to stop this process, delete kill file " + killfile.getAbsolutePath());
                 while (APIServer.isAlive() && killfile.exists()) {
                     try {Thread.sleep(1000);} catch (InterruptedException e) {}
                 }
@@ -191,15 +192,15 @@ public enum Service {
                 // something with the pid file creation did not work; fail-over to normal operation waiting for a kill command
                 APIServer.join();
             }
-            Data.logger.info("server nominal termination requested");
+            Logger.info("server nominal termination requested");
         } catch (IOException e) {
-            Data.logger.error("Main fail", e);
+            Logger.error("Main fail", e);
         } finally {
             APIServer.stop();
             if (hazelcast != null) hazelcast.shutdown();
-            Data.logger.info("closing data.");
+            Logger.info("closing data.");
             Data.close();
-            Data.logger.info("server terminated.");
+            Logger.info("server terminated.");
         }
     }
 

@@ -25,10 +25,6 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Map;
 
-import org.apache.log4j.ConsoleAppender;
-import org.apache.log4j.Logger;
-import org.apache.log4j.PatternLayout;
-
 import net.yacy.grid.YaCyServices;
 import net.yacy.grid.io.assets.GridStorage;
 import net.yacy.grid.io.control.GridControl;
@@ -38,6 +34,7 @@ import net.yacy.grid.io.index.BoostsFactory;
 import net.yacy.grid.io.index.ElasticIndexFactory;
 import net.yacy.grid.io.index.GridIndex;
 import net.yacy.grid.io.messages.GridBroker;
+import net.yacy.grid.tools.Logger;
 import net.yacy.grid.tools.OS;
 
 public class Data {
@@ -49,23 +46,14 @@ public class Data {
     public static GridStorage gridStorage;
     public static GridIndex gridIndex;
     public static GridControl gridControl;
-    public static Logger logger;
     public static Map<String, String> config;
-    public static LogAppender logAppender;
     public static BoostsFactory boostsFactory;
 
     //public static Swagger swagger;
 
     public static void init(File serviceData, Map<String, String> cc, boolean localStorage) {
-        PatternLayout layout = new PatternLayout("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %p %c %x - %m%n");
-        logger = Logger.getRootLogger();
-        logger.removeAllAppenders();
-        logAppender = new LogAppender(layout, 100000);
-        logger.addAppender(logAppender);
-        ConsoleAppender ca = new ConsoleAppender(layout);
-        ca.setImmediateFlush(false);
-        logger.addAppender(ca);
 
+        //final LogManager logManager = LogManager.getLogManager();
         config = cc;
         /*
         try {
@@ -75,27 +63,34 @@ public class Data {
         */
         //swagger.getServlets().forEach(path -> System.out.println(swagger.getServlet(path).toString()));
 
+        // log config
+        for (Map.Entry<String, String> centry: config.entrySet()) {
+            String key = centry.getKey();
+            boolean pw = key.toLowerCase().contains("password");
+            Logger.info("CONFIG: " + key + " = " + (pw ? "***" : centry.getValue()));
+        }
+
         gridServicePath = serviceData;
         if (!gridServicePath.exists()) gridServicePath.mkdirs();
 
         // create databases
-        File dbPath = new File(gridServicePath, "db");
+        final File dbPath = new File(gridServicePath, "db");
         if (!dbPath.exists()) dbPath.mkdirs();
         peerDB = new PeerDatabase(dbPath);
         peerJsonDB = new JSONDatabase(peerDB);
 
         // create broker
-        File messagesPath = new File(gridServicePath, "messages");
+        final File messagesPath = new File(gridServicePath, "messages");
         if (!messagesPath.exists()) messagesPath.mkdirs();
-        boolean lazy = config.containsKey("grid.broker.lazy") && config.get("grid.broker.lazy").equals("true");
-        boolean autoAck = config.containsKey("grid.broker.autoAck") && config.get("grid.broker.autoAck").equals("true");
-        int queueLimit = config.containsKey("grid.broker.queue.limit") ? Integer.parseInt(config.get("grid.broker.queue.limit")) : 0;
-        int queueThrottling = config.containsKey("grid.broker.queue.throttling") ? Integer.parseInt(config.get("grid.broker.queue.throttling")) : 0;
+        final boolean lazy = config.containsKey("grid.broker.lazy") && config.get("grid.broker.lazy").equals("true");
+        final boolean autoAck = config.containsKey("grid.broker.autoAck") && config.get("grid.broker.autoAck").equals("true");
+        final int queueLimit = config.containsKey("grid.broker.queue.limit") ? Integer.parseInt(config.get("grid.broker.queue.limit")) : 0;
+        final int queueThrottling = config.containsKey("grid.broker.queue.throttling") ? Integer.parseInt(config.get("grid.broker.queue.throttling")) : 0;
         gridBroker = new GridBroker(localStorage ? messagesPath : null, lazy, autoAck, queueLimit, queueThrottling);
 
         // create storage
-        File assetsPath = new File(gridServicePath, "assets");
-        boolean deleteafterread = cc.containsKey("grid.assets.delete") && cc.get("grid.assets.delete").equals("true");
+        final File assetsPath = new File(gridServicePath, "assets");
+        final boolean deleteafterread = cc.containsKey("grid.assets.delete") && cc.get("grid.assets.delete").equals("true");
         gridStorage = new GridStorage(deleteafterread, localStorage ? assetsPath : null);
 
         // create index
@@ -106,101 +101,116 @@ public class Data {
 
         // check network situation
         try {
-            Data.logger.info("Local Host Address: " + InetAddress.getLocalHost().getHostAddress());
-        } catch (UnknownHostException e1) {
+            Logger.info("Local Host Address: " + InetAddress.getLocalHost().getHostAddress());
+        } catch (final UnknownHostException e1) {
             e1.printStackTrace();
         }
 
         // connect outside services
         // first try to connect to the configured MCPs.
         // if that fails, try to make all connections self
-        String gridMcpAddressl = config.containsKey("grid.mcp.address") ? config.get("grid.mcp.address") : "";
-        String[] gridMcpAddress = gridMcpAddressl.split(",");
+        final String gridMcpAddressl = config.containsKey("grid.mcp.address") ? config.get("grid.mcp.address") : "";
+        final String[] gridMcpAddress = gridMcpAddressl.split(",");
         boolean mcpConnected = false;
-        for (String address: gridMcpAddress) {
-        	if (address.length() == 0) continue;
-            String host = getHost(address);
-            int port = YaCyServices.mcp.getDefaultPort();
-            if (    address.length() > 0 &&
-                    Data.gridBroker.connectMCP(host, port) &&
-                    Data.gridStorage.connectMCP(host, port, true) &&
-                    Data.gridIndex.connectMCP(host, port) &&
-                    Data.gridControl.connectMCP(host, port)
-                ) {
-                Data.logger.info("Connected MCP at " + getHost(address));
-                mcpConnected = true;
-                break;
-            }
+        for (final String address: gridMcpAddress) {
+            if (address.length() <= 0) continue;
+            Logger.info("Attempting Grid Connection to " + address);
+
+            final String host = getHost(address);
+            final int port = YaCyServices.mcp.getDefaultPort();
+            Logger.info("Checking Broker connection at " + host + ":" + port);
+            boolean brokerConnected = Data.gridBroker.connectMCP(host, port);
+            if (!brokerConnected) {Logger.warn("..failed"); continue;}
+            Logger.info(".. ok, RabbitMQ connected: " + Data.gridBroker.isRabbitMQConnected());
+
+            Logger.info("Checking Storage connection at " + host + ":" + port);
+            boolean storageConnected = Data.gridStorage.connectMCP(host, port, true);
+            if (!storageConnected) {Logger.warn("..failed"); continue;}
+            Logger.info(".. ok, S3 connected: " + Data.gridStorage.isS3Connected());
+
+            Logger.info("Checking Index connection at " + host + ":" + port);
+            boolean indexConnected = Data.gridIndex.connectMCP(host, port);
+            if (!indexConnected) {Logger.warn("..failed"); continue;}
+            Logger.info(".. ok, Elastic connected: " + Data.gridIndex.isConnected());
+
+            Logger.info("Checking Control connection at " + host + ":" + port);
+            boolean controlConnected = Data.gridControl.connectMCP(host, port);
+            if (!controlConnected) {Logger.warn("..failed"); continue;}
+            Logger.info(".. ok, Control connected: " + Data.gridControl.getConnectionURL() + " with url "+ Data.gridControl.getConnectionURL());
+
+            Logger.info("Connected MCP at " + getHost(address));
+            mcpConnected = true;
+            break;
         }
 
         if (!mcpConnected) {
             // try to connect to local services directly
 
             // connect broker
-            String[] gridBrokerAddress = (config.containsKey("grid.broker.address") ? config.get("grid.broker.address") : "").split(",");
-            for (String address: gridBrokerAddress) {
+            final String[] gridBrokerAddress = (config.containsKey("grid.broker.address") ? config.get("grid.broker.address") : "").split(",");
+            for (final String address: gridBrokerAddress) {
                 if (!OS.portIsOpen(address)) continue;
                 if (Data.gridBroker.connectRabbitMQ(getHost(address), getPort(address, "-1"), getUser(address, "anonymous"), getPassword(address, "yacy"))) {
-                    Data.logger.info("Connected Broker at " + getHost(address));
+                    Logger.info("Connected Broker at " + getHost(address));
                     break;
                 }
             }
             if (!Data.gridBroker.isRabbitMQConnected()) {
-                Data.logger.info("Connected to the embedded Broker");
+                Logger.info("Connected to the embedded Broker");
             }
 
             // connect storage
             // s3
-            String[] gridS3Address = (config.containsKey("grid.s3.address") ? config.get("grid.s3.address") : "").split(",");
-            boolean  gridS3Active = config.containsKey("grid.s3.active") ? "true".equals(config.get("grid.s3.active")) : true;
-            for (String address: gridS3Address) {
+            final String[] gridS3Address = (config.containsKey("grid.s3.address") ? config.get("grid.s3.address") : "").split(",");
+            final boolean  gridS3Active = config.containsKey("grid.s3.active") ? "true".equals(config.get("grid.s3.active")) : true;
+            for (final String address: gridS3Address) {
                 if (address.length() > 0 && Data.gridStorage.connectS3(getHost(address) /*bucket.endpoint*/, getPort(address, "9000"), getUser(address, "admin"), getPassword(address, "12345678"), gridS3Active)) {
-                    Data.logger.info("Connected S3 Storage at " + getHost(address));
+                    Logger.info("Connected S3 Storage at " + getHost(address));
                     break;
                 }
             }
 
             // ftp
-            String[] gridFtpAddress = (config.containsKey("grid.ftp.address") ? config.get("grid.ftp.address") : "").split(",");
-            boolean  gridFtpActive = config.containsKey("grid.ftp.active") ? "true".equals(config.get("grid.ftp.active")) : true;
-            for (String address: gridFtpAddress) {
+            final String[] gridFtpAddress = (config.containsKey("grid.ftp.address") ? config.get("grid.ftp.address") : "").split(",");
+            final boolean  gridFtpActive = config.containsKey("grid.ftp.active") ? "true".equals(config.get("grid.ftp.active")) : true;
+            for (final String address: gridFtpAddress) {
                 if (address.length() > 0 && Data.gridStorage.connectFTP(getHost(address), getPort(address, "2121"), getUser(address, "admin"), getPassword(address, "admin"), gridFtpActive)) {
-                    Data.logger.info("Connected FTP Storage at " + getHost(address));
+                    Logger.info("Connected FTP Storage at " + getHost(address));
                     break;
                 }
             }
 
             // if there is no ftp and no s3 connection, we use a local asset storage
             if (!Data.gridStorage.isFTPConnected() && !Data.gridStorage.isS3Connected()) {
-                Data.logger.info("Connected to the embedded Asset Storage");
+                Logger.info("Connected to the embedded Asset Storage");
             }
 
             // connect index
-            String[] elasticsearchAddress = config.getOrDefault("grid.elasticsearch.address", "").split(",");
-            String elasticsearchClusterName = config.getOrDefault("grid.elasticsearch.clusterName", "");
-            String elasticsearchTypeName = config.getOrDefault("grid.elasticsearch.typeName", "_doc");
-            for (String address: elasticsearchAddress) {
+            final String[] elasticsearchAddress = config.getOrDefault("grid.elasticsearch.address", "").split(",");
+            final String elasticsearchClusterName = config.getOrDefault("grid.elasticsearch.clusterName", "");
+            final String elasticsearchTypeName = config.getOrDefault("grid.elasticsearch.typeName", "_doc");
+            for (final String address: elasticsearchAddress) {
                 if (!OS.portIsOpen(address)) continue;
                 try {
                     gridIndex = new GridIndex();
                     gridIndex.connectElasticsearch(ElasticIndexFactory.PROTOCOL_PREFIX + address + "/" + elasticsearchClusterName);
                     break;
-                } catch (Exception e) {
+                } catch (final Exception e) {
                     e.printStackTrace();
                 }
             }
         }
 
         // find connections first here before concurrent threads try to make their own connection concurrently
-        try { Data.gridIndex.checkConnection(); } catch (IOException e) { Data.logger.fatal("no connection to MCP", e); }
+        try { Data.gridIndex.checkConnection(); } catch (final IOException e) { Logger.error("no connection to MCP", e); }
 
         // init boosts from configuration
-        Map<String, String> defaultBoosts = Service.readDoubleConfig("boost.properties");
+        final Map<String, String> defaultBoosts = Service.readDoubleConfig("boost.properties");
         boostsFactory = new BoostsFactory(defaultBoosts);
     }
 
     public static String getHost(String address) {
-        String hp = t(address, '@', address);
+        final String hp = t(address, '@', address);
         return h(hp, ':', hp);
     }
     public static int getPort(String address, String defaultPort) {
@@ -214,18 +224,18 @@ public class Data {
     }
 
     private static String h(String a, char s, String d) {
-        int p = a.indexOf(s);
+        final int p = a.indexOf(s);
         return p < 0 ? d : a.substring(0,  p);
     }
 
     private static String t(String a, char s, String d) {
-        int p = a.indexOf(s);
+        final int p = a.indexOf(s);
         return p < 0 ? d : a.substring(p + 1);
     }
 
     public static void clearCaches() {
         // should i.e. be called in case of short memory status
-        logAppender.clean(5000);
+        Logger.clean(5000);
 
     }
 
