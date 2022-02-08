@@ -1,17 +1,17 @@
 /**
  *  Memory
- *  Copyright 14.01.2017 by Michael Peter Christen, @0rb1t3r
+ *  Copyright 14.01.2017 by Michael Peter Christen, @orbiterlab
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
  *  License as published by the Free Software Foundation; either
  *  version 2.1 of the License, or (at your option) any later version.
- *  
+ *
  *  This library is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  *  Lesser General Public License for more details.
- *  
+ *
  *  You should have received a copy of the GNU Lesser General Public License
  *  along with this program in the file lgpl21.txt
  *  If not, see <http://www.gnu.org/licenses/>.
@@ -23,8 +23,6 @@ import java.lang.management.ManagementFactory;
 import java.lang.management.OperatingSystemMXBean;
 import java.lang.management.ThreadInfo;
 import java.lang.management.ThreadMXBean;
-
-import net.yacy.grid.mcp.Data;
 
 public class Memory {
 
@@ -80,7 +78,7 @@ public class Memory {
     public static final long cores() {
         return runtime.availableProcessors();
     }
-    
+
     /**
      * get the system load within the last minute
      * @return the system load or a negative number if the load is not available
@@ -88,7 +86,7 @@ public class Memory {
     public static double load() {
         return osBean.getSystemLoadAverage();
     }
-    
+
     /**
      * find out the number of thread deadlocks. WARNING: this is a time-consuming task
      * @return the number of deadlocked threads
@@ -98,7 +96,7 @@ public class Memory {
         if (deadlockIDs == null) return 0;
         return deadlockIDs.length;
     }
-    
+
     /**
      * write deadlocked threads as to the log as warning
      */
@@ -107,10 +105,10 @@ public class Memory {
         if (deadlockIDs == null) return;
         ThreadInfo[] infos = ManagementFactory.getThreadMXBean().getThreadInfo(deadlockIDs, true, true);
         for (ThreadInfo ti : infos) {
-            Data.logger.warn("DEADLOCKREPORT: " + ti.toString());
+            Logger.warn("DEADLOCKREPORT: " + ti.toString());
         }
     }
-    
+
     private static long lastGCtime = 0;
 
     /**

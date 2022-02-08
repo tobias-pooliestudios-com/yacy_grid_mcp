@@ -1,17 +1,17 @@
 /**
  *  DateParser
- *  Copyright 09.04.2015 by Michael Peter Christen, @0rb1t3r
+ *  Copyright 09.04.2015 by Michael Peter Christen, @orbiterlab
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
  *  License as published by the Free Software Foundation; either
  *  version 2.1 of the License, or (at your option) any later version.
- *  
+ *
  *  This library is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  *  Lesser General Public License for more details.
- *  
+ *
  *  You should have received a copy of the GNU Lesser General Public License
  *  along with this program in the file lgpl21.txt
  *  If not, see <http://www.gnu.org/licenses/>.
@@ -31,8 +31,6 @@ import java.util.concurrent.TimeUnit;
 
 import org.joda.time.format.DateTimeFormatter;
 import org.joda.time.format.ISODateTimeFormat;
-
-import net.yacy.grid.mcp.Data;
 
 public class DateParser {
 
@@ -112,7 +110,7 @@ public class DateParser {
     public static int getTimezoneOffset() {
         Calendar calendar = new GregorianCalendar();
         TimeZone timeZone = calendar.getTimeZone();
-        return - (int) TimeUnit.MILLISECONDS.toMinutes(timeZone.getRawOffset()); // we negate the offset because thats the value which is provided by the browser as well 
+        return - (int) TimeUnit.MILLISECONDS.toMinutes(timeZone.getRawOffset()); // we negate the offset because thats the value which is provided by the browser as well
     }
 
     public static Date oneHourAgo() {
@@ -181,7 +179,7 @@ public class DateParser {
         try {
             System.out.println("post date to date     : " + parse(postDate, getTimezoneOffset()).getTime().getTime());
         } catch (ParseException | NumberFormatException e) {
-            Data.logger.warn("", e);
+            Logger.warn(e);
         }
     }
 }

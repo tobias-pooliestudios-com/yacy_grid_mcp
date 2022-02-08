@@ -36,12 +36,12 @@ import net.yacy.grid.YaCyServices;
 import net.yacy.grid.http.APIServer;
 import net.yacy.grid.http.ObjectAPIHandler;
 import net.yacy.grid.http.ServiceResponse;
-import net.yacy.grid.mcp.Data;
 import net.yacy.grid.mcp.MCP;
 import net.yacy.grid.mcp.Service;
 import net.yacy.grid.mcp.api.assets.LoadService;
 import net.yacy.grid.mcp.api.assets.StoreService;
 import net.yacy.grid.mcp.api.info.StatusService;
+import net.yacy.grid.tools.Logger;
 
 public class MCPStorageFactory implements StorageFactory<byte[]> {
 
@@ -93,7 +93,7 @@ public class MCPStorageFactory implements StorageFactory<byte[]> {
                 final Map<String, byte[]> params = new HashMap<>();
                 String protocolhostportstub = MCPStorageFactory.this.getConnectionURL();
                 ServiceResponse sr = APIServer.getAPI(StatusService.NAME).serviceImpl(protocolhostportstub, params);
-                if (!sr.getObject().has("system")) throw new IOException("MCP does not respond properly");
+                if (!sr.getObject().has("status")) throw new IOException("MCP does not respond properly");
             }
 
             @Override
@@ -133,11 +133,11 @@ public class MCPStorageFactory implements StorageFactory<byte[]> {
                     if (p > 0) MCPStorageFactory.this.remoteSystem = server.substring(0, p);
                     if (MCPStorageFactory.this.storage != null) {
                         if (MCPStorageFactory.this.storage.connectS3(server, MCPStorageFactory.this.active)) {
-                            Data.logger.info("MCPStorageFactory.connectMCP connected S3 storage at " + server);
+                            Logger.info(this.getClass(), "MCPStorageFactory.connectMCP connected S3 storage at " + server);
                         } else if (MCPStorageFactory.this.storage.connectFTP(server, MCPStorageFactory.this.active)) {
-                            Data.logger.info("MCPStorageFactory.connectMCP connected FTP storage at " + server);
+                            Logger.info(this.getClass(), "MCPStorageFactory.connectMCP connected FTP storage at " + server);
                         } else {
-                            Data.logger.error("MCPStorageFactory.connectMCP failed to connect MCP storage at " + server);
+                            Logger.error(this.getClass(), "MCPStorageFactory.connectMCP failed to connect MCP storage at " + server);
                         }
                     }
                 }
