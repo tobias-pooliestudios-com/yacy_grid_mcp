@@ -6,12 +6,12 @@
  *  modify it under the terms of the GNU Lesser General Public
  *  License as published by the Free Software Foundation; either
  *  version 2.1 of the License, or (at your option) any later version.
- *  
+ *
  *  This library is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  *  Lesser General Public License for more details.
- *  
+ *
  *  You should have received a copy of the GNU Lesser General Public License
  *  along with this program in the file lgpl21.txt
  *  If not, see <http://www.gnu.org/licenses/>.
@@ -24,7 +24,7 @@ import java.io.IOException;
 /**
  * Interface for a Message Queue
  */
-public interface Queue<A> {
+public interface Queue {
 
     /**
      * check the connection
@@ -38,17 +38,17 @@ public interface Queue<A> {
      * @return the Queue
      * @throws IOException
      */
-    public Queue<A> send(A message) throws IOException;
+    public Queue send(byte[] message) throws IOException;
 
     /**
      * receive a message from the queue. The method blocks until a message is available
      * @param timeout for blocking in milliseconds. if negative the method blocks forever
-     * or until a message is submitted. 
+     * or until a message is submitted.
      * @oaram autoAck if true the received message is autoAck'ed. If false, the message must be acknowledged to free up resources
      * @return the message or null if a timeout occurred
      * @throws IOException
      */
-    public MessageContainer<A> receive(long timeout, boolean autoAck) throws IOException;
+    public MessageContainer receive(long timeout, boolean autoAck) throws IOException;
 
     /**
      * acknowledge a message. This MUST be used to remove a message from the broker if
@@ -87,4 +87,10 @@ public interface Queue<A> {
      * @throws IOException
      */
     public void clear() throws IOException;
+
+    /**
+     * close a queue
+     * @throws IOException
+     */
+    public void close() throws IOException;
 }
