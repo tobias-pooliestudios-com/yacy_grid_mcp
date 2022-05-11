@@ -1,6 +1,6 @@
 /**
- *  RecoverService
- *  Copyright 26.6.2019 by Michael Peter Christen, @orbiterlab
+ *  QueuesService
+ *  Copyright 27.03.2022 by Michael Peter Christen, @orbiterlab
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -19,10 +19,11 @@
 
 package net.yacy.grid.mcp.api.messages;
 
-import java.io.IOException;
+import java.util.Map;
 
 import javax.servlet.http.HttpServletResponse;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import net.yacy.grid.YaCyServices;
@@ -30,17 +31,17 @@ import net.yacy.grid.http.APIHandler;
 import net.yacy.grid.http.ObjectAPIHandler;
 import net.yacy.grid.http.Query;
 import net.yacy.grid.http.ServiceResponse;
-import net.yacy.grid.io.messages.GridQueue;
-import net.yacy.grid.mcp.Service;
 
 /**
- * test: call
- * http://127.0.0.1:8100/yacy/grid/mcp/messages/recover.json?serviceName=crawler&queueName=webcrawler_00
+ * QueuesService
+ * Does not require any parameter, it produces a list of queue names for each service that can be retrieved by the messages apis
+ * i.e.:
+ * http://127.0.0.1:8100/yacy/grid/mcp/messages/queues.json
  */
-public class RecoverService extends ObjectAPIHandler implements APIHandler {
+public class QueuesService  extends ObjectAPIHandler implements APIHandler {
 
-    private static final long serialVersionUID = 8578478303031749879L;
-    public static final String NAME = "recover";
+    private static final long serialVersionUID = 8578475243031749879L;
+    public static final String NAME = "queues";
 
     @Override
     public String getAPIPath() {
@@ -49,21 +50,19 @@ public class RecoverService extends ObjectAPIHandler implements APIHandler {
 
     @Override
     public ServiceResponse serviceImpl(final Query call, final HttpServletResponse response) {
-        final String serviceName = call.get("serviceName", "");
-        final String queueName = call.get("queueName", "");
         final JSONObject json = new JSONObject(true);
-        if (serviceName.length() > 0 && queueName.length() > 0) {
-            try {
-                Service.instance.config.gridBroker.recover(YaCyServices.valueOf(serviceName), new GridQueue(queueName));
-                json.put(ObjectAPIHandler.SUCCESS_KEY, true);
-            } catch (final IOException e) {
-                json.put(ObjectAPIHandler.SUCCESS_KEY, false);
-                json.put(ObjectAPIHandler.COMMENT_KEY, e.getMessage());
+        final Map<String, String[]> map = YaCyServices.getServiceQueueArrayMap();
+        json.put(ObjectAPIHandler.SUCCESS_KEY, true);
+        final JSONObject services = new JSONObject(true);
+        json.put("services", services);
+        for (final Map.Entry<String, String[]> entry: map.entrySet()) {
+            final JSONArray queues = new JSONArray();
+            for (int j = 0; j < entry.getValue().length; j++) {
+                queues.put(entry.getValue()[j]);
             }
-        } else {
-            json.put(ObjectAPIHandler.SUCCESS_KEY, false);
-            json.put(ObjectAPIHandler.COMMENT_KEY, "the request must contain a serviceName and a queueName");
+            services.put(entry.getKey(), queues);
         }
         return new ServiceResponse(json);
     }
+
 }

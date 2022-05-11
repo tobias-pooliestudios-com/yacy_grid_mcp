@@ -1,6 +1,6 @@
 /**
- *  AbstractQueue
- *  Copyright 03.01.2018 by Michael Peter Christen, @orbiterlab
+ *  User
+ *  Copyright 18.04.2022 by Michael Peter Christen, @orbiterlab
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -17,16 +17,10 @@
  *  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package net.yacy.grid.io.messages;
+package net.yacy.grid.contracts;
 
-import java.io.IOException;
+public class User {
 
-public abstract class AbstractQueue implements Queue {
-
-    @Override
-    public void clear() throws IOException {
-        long count = available();
-        while (count-- > 0) {if  (receive(100, true) == null) break;}
-    }
+	public final static String ANONYMOUS_ID = "112358132"; // a special ID which shall be used as anonymous
 
 }
