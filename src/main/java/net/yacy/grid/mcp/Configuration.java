@@ -142,8 +142,7 @@ public class Configuration {
             public void run() {
                 Config hazelcastconfig = new Config().setClusterName("YaCyGrid").setInstanceName("Services");
 
-                final String hazelcastConfigPath = System.getProperty("hazelcast.config");
-                if (hazelcastConfigPath != null) {
+                if (System.getProperty("hazelcast.config") != null) {
                     hazelcastconfig = Config.load();
                 }
 
