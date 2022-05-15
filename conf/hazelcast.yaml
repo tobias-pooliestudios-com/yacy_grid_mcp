@@ -1,0 +1,6 @@
+hazelcast:
+  cluster-name: 'YaCyGrid'
+  instance-name: 'Service'
+  network:
+    rest-api:
+      enabled: true
