@@ -55,7 +55,13 @@ bin/ai/
 bin/log4j.properties
 bin/net/
 bin/org/
+*.log
 
 config-mcp.properties
 log4j.properties
 docker/config-ftp.properties
+
+
+# nix direnv setup #
+####################
+.direnv/

@@ -140,7 +140,12 @@ public class Configuration {
         final Thread hazelcastStarter = new Thread() {
             @Override
             public void run() {
-                final Config hazelcastconfig = new Config().setClusterName("YaCyGrid").setInstanceName("Services");
+                Config hazelcastconfig = new Config().setClusterName("YaCyGrid").setInstanceName("Services");
+
+                if (System.getProperty("hazelcast.config") != null) {
+                    hazelcastconfig = Config.load();
+                }
+
                 Configuration.this.hazelcast = Hazelcast.newHazelcastInstance(hazelcastconfig);
                 final String uuid = Configuration.this.hazelcast.getCluster().getLocalMember().getUuid().toString();
                 Configuration.this.hazelcast.getMap("status").put(uuid, StatusService.status());
