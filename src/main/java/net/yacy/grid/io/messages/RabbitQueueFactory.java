@@ -89,6 +89,7 @@ public class RabbitQueueFactory implements QueueFactory {
         if (this.port > 0) this.connectionFactory.setPort(this.port);
         if (this.username != null && this.username.length() > 0) this.connectionFactory.setUsername(this.username);
         if (this.password != null && this.password.length() > 0) this.connectionFactory.setPassword(this.password);
+        this.connectionFactory.setMaxInboundMessageBodySize(134217728); // 128 MiB
     }
 
     private Connection getConnection() throws IOException {
